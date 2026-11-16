@@ -1,29 +1,41 @@
-plugins { id 'com.android.application' }
-android {
-  namespace 'uz.ecolab.poliglot'
-  compileSdk 34
-  defaultConfig {
-    applicationId 'uz.ecolab.poliglot'
-    minSdk 26
-    targetSdk 34
-    versionCode 1
-    versionName '1.0'
-  }
-  signingConfigs {
-    fixed {
-      storeFile file('poliglot.keystore')
-      storePassword 'poliglot'
-      keyAlias 'poliglot'
-      keyPassword 'poliglot'
-    }
-  }
-  buildTypes {
-    debug { signingConfig signingConfigs.fixed }
-    release { minifyEnabled false; signingConfig signingConfigs.fixed }
-  }
-  compileOptions {
-    sourceCompatibility JavaVersion.VERSION_17
-    targetCompatibility JavaVersion.VERSION_17
-  }
+plugins {
+    id 'com.android.application'
 }
-dependencies { implementation 'androidx.webkit:webkit:1.11.0' }
+
+android {
+    namespace 'uz.ecolab.poliglot'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "uz.ecolab.poliglot"
+        minSdk 26
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+        versionName "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+    }
+
+    signingConfigs {
+        // Doimiy kalit: yangi versiya eskisining ustidan o'rnatiladi, progress o'chmaydi
+        poliglot {
+            storeFile file("poliglot.keystore")
+            storePassword "poliglot"
+            keyAlias "poliglot"
+            keyPassword "poliglot"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.poliglot
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.poliglot
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -13,4 +13,4 @@ Ingliz tili (B1, speaking) va arab tili (0 dan) uchun 30 kunlik Android ilova.
 Har `main` ga push qilinganda GitHub Actions APK yig'adi:
 **Releases → latest → poliglot.apk**
 
-Ilova kodi: `app/src/main/assets/index.html` (interfeys), `MainActivity.java` (ovoz, mikrofon, eslatma).
+Ilova kodi: `app/src/main/assets/www/` (interfeys va 30 kunlik dastur: `data.js`), `MainActivity.java` (ovoz, mikrofon, nutqni tanish), `Reminder.java` (kunlik eslatma).
