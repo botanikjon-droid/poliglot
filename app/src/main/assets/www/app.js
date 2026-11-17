@@ -47,18 +47,199 @@
     return out;
   }
 
+  function statusText() { var d = curDay(); return d + "-kun: " + EN_DAYS[d][0] + " · Arab: " + AR_DAYS[d].t + ". Seriya: " + streak() + " kun. 30 daqiqa ajrating!"; }
   function pushStatus() {
     if (!A || !A.setStatus) return;
-    var d = curDay();
-    try { A.setStatus(d + "-kun: " + EN_DAYS[d][0] + " · Arab: " + AR_DAYS[d].t + ". Seriya: " + streak() + " kun. 30 daqiqa ajrating!"); } catch (e) {}
+    try { A.setStatus(statusText()); } catch (e) {}
+  }
+
+  // ---------- kompyuter (brauzer) rejimi: mikrofon, yozuvlar, eslatma ----------
+  var mic = { devices: [], stream: null, rec: null, chunks: [], meter: null, meterH: null, testing: false };
+  var hasMD = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  function isFifine(d) { return /fifine/i.test(d.label || ""); }
+  function refreshMics() {
+    if (!hasMD || !navigator.mediaDevices.enumerateDevices) return Promise.resolve([]);
+    return navigator.mediaDevices.enumerateDevices().then(function (ds) {
+      mic.devices = ds.filter(function (d) { return d.kind === "audioinput" && d.deviceId !== "communications"; });
+      var cur = null, fif = null;
+      mic.devices.forEach(function (d) { if (d.deviceId === S.mic) cur = d; if (!fif && isFifine(d)) fif = d; });
+      // Fifine ulangan bo'lsa va boshqa mikrofon qo'lda tanlanmagan bo'lsa — Fifine'ni olamiz
+      if (fif && (!cur || (!S.micManual && !isFifine(cur)))) { S.mic = fif.deviceId; S.micLabel = fif.label; save(); }
+      else if (cur && cur.label) S.micLabel = cur.label;
+      if (ui.tab === "set" && !ui.sheet) render();
+      return mic.devices;
+    }, function () { return []; });
+  }
+  function getMicStream(again) {
+    if (!hasMD) return Promise.reject({ name: "NoSupport" });
+    var a = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+    if (S.mic && S.mic !== "default") a.deviceId = { exact: S.mic };
+    return navigator.mediaDevices.getUserMedia({ audio: a }).catch(function (e) {
+      if (a.deviceId && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) { S.mic = ""; return navigator.mediaDevices.getUserMedia({ audio: true }); }
+      throw e;
+    }).then(function (st) {
+      mic.stream = st;
+      return refreshMics().then(function () {
+        // ruxsatdan keyin nom ko'rinadi: Fifine topilsa va hozirgi oqim boshqa qurilmadan bo'lsa, qayta ochamiz
+        var tr = st.getAudioTracks()[0], id = tr && tr.getSettings ? tr.getSettings().deviceId : "";
+        if (!again && S.mic && id && id !== S.mic) { stopStream(); return getMicStream(true); }
+        return st;
+      });
+    });
+  }
+  function stopStream() { if (mic.stream) { mic.stream.getTracks().forEach(function (t) { t.stop(); }); mic.stream = null; } }
+  function micError(e) {
+    var n = (e && e.name) || "";
+    if (n === "NotAllowedError" || n === "SecurityError") toast("Mikrofonga ruxsat berilmadi. Manzil satri chap tomonidagi belgidan ruxsat bering.");
+    else if (n === "NotFoundError") toast("Mikrofon topilmadi. Fifine USB kabelini ulang.");
+    else if (n === "NotReadableError") toast("Mikrofon band: boshqa dastur (Zoom, Telegram) uni ishlatyapti.");
+    else if (n === "NoSupport") toast("Bu brauzer mikrofonni qo'llamaydi: Edge yoki Chrome'da oching.");
+    else toast("Mikrofon ochilmadi.");
+  }
+  function startMeter(stream, id) {
+    stopMeter();
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.resume) actx.resume();
+      var src = actx.createMediaStreamSource(stream), an = actx.createAnalyser();
+      an.fftSize = 1024; src.connect(an);
+      var buf = new Float32Array(an.fftSize);
+      mic.meter = src;
+      (function loop() {
+        an.getFloatTimeDomainData(buf);
+        var p = 0; for (var i = 0; i < buf.length; i++) { var v = Math.abs(buf[i]); if (v > p) p = v; }
+        var el = document.getElementById(id);
+        if (el) { var w = Math.min(100, Math.round(Math.sqrt(p) * 110)); el.style.width = w + "%"; el.className = p > 0.95 ? "clip" : ""; }
+        mic.meterH = requestAnimationFrame(loop);
+      })();
+    } catch (e) {}
+  }
+  function stopMeter() {
+    if (mic.meterH) cancelAnimationFrame(mic.meterH);
+    mic.meterH = null;
+    if (mic.meter) { try { mic.meter.disconnect(); } catch (e) {} mic.meter = null; }
+  }
+  function micTest() {
+    if (mic.testing) { mic.testing = false; stopMeter(); if (!ui.recOn) stopStream(); render(); return; }
+    getMicStream().then(function (st) { mic.testing = true; render(); startMeter(st, "testMeter"); }, micError);
+  }
+
+  // yozuvlar kompyuterda IndexedDB'da saqlanadi
+  var DBP = null, WR = [];
+  function db() {
+    if (!DBP) DBP = new Promise(function (res, rej) {
+      if (!window.indexedDB) { rej(new Error("no idb")); return; }
+      var r = indexedDB.open("poliglot", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("recs", { keyPath: "name" }); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+    return DBP;
+  }
+  function idb(mode, fn) {
+    return db().then(function (d) {
+      return new Promise(function (res, rej) {
+        var tx = d.transaction("recs", mode), q = fn(tx.objectStore("recs"));
+        tx.oncomplete = function () { res(q ? q.result : null); };
+        tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function loadRecs() {
+    return idb("readonly", function (st) { return st.getAll(); }).then(function (list) {
+      WR = (list || []).sort(function (a, b) { return b.time - a.time; });
+      if (ui.tab === "rec" && !ui.recOn) render();
+    }, function () {});
+  }
+  function webRecStart() {
+    if (!window.MediaRecorder) { toast("Bu brauzer ovoz yozishni qo'llamaydi: Edge yoki Chrome'da oching."); return; }
+    getMicStream().then(function (stream) {
+      var types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"], mt = "";
+      for (var i = 0; i < types.length; i++) if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(types[i])) { mt = types[i]; break; }
+      var mr = new MediaRecorder(stream, mt ? { mimeType: mt, audioBitsPerSecond: 128000 } : undefined);
+      mic.chunks = [];
+      mr.ondataavailable = function (e) { if (e.data && e.data.size) mic.chunks.push(e.data); };
+      mr.onstop = function () {
+        var dur = Date.now() - ui.recT0, type = mr.mimeType || "audio/webm";
+        var blob = new Blob(mic.chunks, { type: type }), ext = /mp4/.test(type) ? "m4a" : /ogg/.test(type) ? "ogg" : "webm";
+        stopMeter(); if (!mic.testing) stopStream();
+        var name = Date.now() + "_" + ui.day + "-kun." + ext;
+        idb("readwrite", function (st) { return st.put({ name: name, time: Date.now(), dur: dur, blob: blob }); })
+          .then(function () { toast("Saqlandi. Endi tinglang!"); return loadRecs(); }, function () { toast("Yozuv saqlanmadi."); });
+      };
+      mr.start(1000); mic.rec = mr;
+      ui.recOn = true; ui.recT0 = Date.now(); ui.recTick = setInterval(updRecClock, 500); render();
+      startMeter(stream, "recMeter");
+    }, micError);
+  }
+  function webRecStop() {
+    ui.recOn = false; clearInterval(ui.recTick);
+    try { if (mic.rec && mic.rec.state !== "inactive") mic.rec.stop(); } catch (e) {}
+    mic.rec = null; markActive(); save(); render();
+  }
+  var player = null, playerUrl = "";
+  function webStopPlay() {
+    if (player) { player.pause(); player = null; }
+    if (playerUrl) { URL.revokeObjectURL(playerUrl); playerUrl = ""; }
+    if (ui.playing) window.onNative("playEnd", "");
+  }
+  function webPlay(name) {
+    webStopPlay();
+    var r = null; WR.forEach(function (x) { if (x.name === name) r = x; });
+    if (!r) return;
+    playerUrl = URL.createObjectURL(r.blob); player = new Audio(playerUrl);
+    if (S.out && player.setSinkId) { try { player.setSinkId(S.out); } catch (e) {} }
+    player.onended = webStopPlay;
+    player.play().then(function () { window.onNative("playStart", name); }, function () { toast("Tinglab bo'lmadi."); webStopPlay(); });
+  }
+  function webDownload(name) {
+    var r = null; WR.forEach(function (x) { if (x.name === name) r = x; });
+    if (!r) return;
+    var a = document.createElement("a"), u = URL.createObjectURL(r.blob);
+    a.href = u; a.download = "poliglot_" + name.split("_").slice(1).join("_"); document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(u); a.parentNode.removeChild(a); }, 1000);
+  }
+
+  // kompyuterda eslatma: Poliglot oynasi ochiq bo'lsa ishlaydi
+  function webReminderTick() {
+    if (A || !S.remOn || !("Notification" in window) || Notification.permission !== "granted") return;
+    var d = new Date(), hm = pad(d.getHours()) + ":" + pad(d.getMinutes()), t = today();
+    if (hm >= S.rem && S.remLast !== t && S.active.indexOf(t) < 0) {
+      S.remLast = t; save();
+      try { new Notification("Poliglot", { body: statusText() }); } catch (e) {}
+    }
+  }
+
+  function copyText(txt, okMsg) {
+    if (A && A.copy) { try { A.copy(txt); toast(okMsg); return; } catch (e) {} }
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { toast(okMsg); }, function () { toast("Nusxa olib bo'lmadi: matnni belgilab, Ctrl+C bosing."); });
+    else toast("Matnni belgilab, Ctrl+C bosing.");
   }
 
   // ---------- ovoz ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition, srObj = null;
+  function pickVoice(lang) {
+    if (!("speechSynthesis" in window)) return null;
+    var vs = speechSynthesis.getVoices() || [], best = null, bs = -1;
+    vs.forEach(function (v) {
+      var l = (v.lang || "").replace("_", "-").toLowerCase(), s = 0;
+      if (lang === "ar") { if (l.indexOf("ar") !== 0) return; }
+      else { if (l.indexOf("en") !== 0) return; if (l === "en-us") s += 4; }
+      if (/natural|online/i.test(v.name)) s += 3;
+      if (/google/i.test(v.name)) s += 2;
+      if (v.localService === false) s += 1;
+      if (s > bs) { bs = s; best = v; }
+    });
+    return best;
+  }
   function speak(text, lang) {
     text = text.replace(/\.\.\./g, " ");
     if (A) { try { A.speak(text, lang === "ar" ? "ar" : "en-US", lang === "ar" ? 0.75 : 0.9); return; } catch (e) {} }
     if ("speechSynthesis" in window) {
+      var v = pickVoice(lang);
+      if (!v && lang === "ar" && speechSynthesis.getVoices().length) { openSheet("arvoice"); return; }
       var u = new SpeechSynthesisUtterance(text); u.lang = lang === "ar" ? "ar-SA" : "en-US"; u.rate = lang === "ar" ? 0.75 : 0.9;
+      if (v) u.voice = v;
       speechSynthesis.cancel(); speechSynthesis.speak(u);
     } else toast("Bu qurilmada ovoz chiqarish yo'q.");
   }
@@ -82,14 +263,41 @@
   }
   function listen() {
     if (!ui.check) return;
-    if (!A) { toast("Talaffuzni tekshirish APK ilovada ishlaydi."); return; }
-    ui.check.heard = null; renderSheet();
+    ui.check.heard = null; ui.check.listening = true;
+    if (!A) {
+      if (!SR) { ui.check.listening = false; renderSheet(); toast("Talaffuzni tekshirish uchun Poliglot'ni Edge yoki Chrome'da oching."); return; }
+      renderSheet();
+      try {
+        if (srObj) srObj.abort();
+        var c = ui.check, r = new SR();
+        r.lang = c.lang === "ar" ? "ar-SA" : "en-US"; r.interimResults = false; r.maxAlternatives = 5; r.continuous = false;
+        r.onresult = function (e) {
+          var res = e.results[0], best = "", bs = -1;
+          for (var i = 0; i < res.length; i++) { var s = scoreOf(c.text, res[i].transcript, c.lang).pct; if (s > bs) { bs = s; best = res[i].transcript; } }
+          window.onNative("speech", best);
+        };
+        r.onerror = function (e) {
+          if (e.error === "aborted") return;
+          window.onNative("speechError", e.error === "not-allowed" || e.error === "service-not-allowed" ? "perm" : e.error === "network" ? "net" : e.error === "audio-capture" ? "mic" : "x");
+        };
+        r.onend = function () { if (srObj === r) srObj = null; if (ui.check === c && c.heard == null) { c.listening = false; renderSheet(); } };
+        r.start(); srObj = r;
+      } catch (e) { ui.check.listening = false; renderSheet(); toast("Nutqni tanish ishga tushmadi."); }
+      return;
+    }
+    renderSheet();
     try { A.listen(ui.check.lang === "ar" ? "ar-SA" : "en-US"); } catch (e) { toast("Nutqni tanish ishga tushmadi."); }
   }
 
   window.onNative = function (type, arg) {
     if (type === "speech") { if (ui.check) { ui.check.heard = arg; renderSheet(); } }
-    else if (type === "speechError") { toast(arg === "none" ? "Telefonda nutqni tanish xizmati topilmadi (Google ilovasini o'rnating)." : "Ovoz eshitilmadi. Qayta urinib ko'ring."); }
+    else if (type === "speechError") {
+      toast(arg === "none" ? "Telefonda nutqni tanish xizmati topilmadi (Google ilovasini o'rnating)."
+        : arg === "perm" ? "Mikrofonga ruxsat berilmadi. Manzil satridagi belgidan ruxsat bering."
+        : arg === "net" ? "Talaffuzni tekshirish uchun internet kerak."
+        : arg === "mic" ? "Mikrofon topilmadi. Fifine ulanganini tekshiring."
+        : "Ovoz eshitilmadi. Qayta urinib ko'ring.");
+    }
     else if (type === "tts") {
       if (arg.indexOf("missing:ar") === 0) openSheet("arvoice");
       else if (arg === "notready") toast("Ovoz dvigateli hali tayyor emas, bir soniyadan keyin bosing.");
@@ -252,19 +460,30 @@
     return h;
   }
 
-  function recs() { if (!A) return []; try { return JSON.parse(A.listRecordings() || "[]"); } catch (e) { return []; } }
+  function recs() {
+    if (!A) return WR.map(function (r) { return { name: r.name, time: r.time, dur: r.dur }; });
+    try { return JSON.parse(A.listRecordings() || "[]"); } catch (e) { return []; }
+  }
+  function micName() {
+    var l = S.mic ? S.micLabel : "";
+    if (!l) mic.devices.forEach(function (d) { if (d.deviceId === "default" && d.label) l = d.label.replace(/^(Default|По умолчанию)\s*-\s*/i, ""); });
+    return l ? l.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "") : "";
+  }
   function vRec() {
     var h = '<section class="card"><h2>O\'zingizni yozib oling</h2><div class="muted small">' + ui.day + "-kun mavzusi: <b>" + esc(EN_DAYS[ui.day][0]) + "</b>. Yozing → tinglang → qayerda to'xtaganingizni toping → qayta yozing.</div>";
-    if (!A) h += '<div class="note">Ovoz yozish APK ilovada ishlaydi.</div>';
-    h += '<button class="recbig ' + (ui.recOn ? "on" : "") + '" data-act="rec" aria-label="' + (ui.recOn ? "To'xtatish" : "Yozishni boshlash") + '">' + (ui.recOn ? I.stop : I.micFill) + '</button><div class="clock" id="recClock">00:00</div></section>';
+    if (!A) h += '<div class="row small"><span class="grow muted">Mikrofon: <b style="color:var(--ink)">' + esc(micName() || "tizimdagi asosiy") + '</b></span><button class="btn ghost sm" data-tab="set">O\'zgartirish</button></div>';
+    h += '<button class="recbig ' + (ui.recOn ? "on" : "") + '" data-act="rec" aria-label="' + (ui.recOn ? "To'xtatish" : "Yozishni boshlash") + '">' + (ui.recOn ? I.stop : I.micFill) + '</button><div class="clock" id="recClock">00:00</div>' +
+      (!A && ui.recOn ? '<div class="meter"><i id="recMeter"></i></div>' : "") +
+      (!A ? '<div class="muted small" style="text-align:center">Probel (Space) tugmasi bilan ham yozishni boshlash/to\'xtatish mumkin.</div>' : "") + "</section>";
     var list = recs();
     h += '<section class="card"><h2>Yozuvlarim</h2>';
     if (!list.length) h += '<div class="muted small">Hali yozuv yo\'q. 1-kundagi yozuvingizni saqlab qo\'ying: 30-kuni solishtirasiz.</div>';
     list.forEach(function (r) {
       var on = ui.playing === r.name, m = Math.floor(r.dur / 60000), s = Math.round((r.dur % 60000) / 1000);
-      var tag = (r.name.split("_")[1] || "").replace(".m4a", "").replace("-kun", "-kun"), dt = new Date(r.time);
+      var tag = (r.name.split("_")[1] || "").replace(/\.\w+$/, ""), dt = new Date(r.time);
       h += '<div class="recitem"><button class="iconbtn" data-play="' + esc(r.name) + '" aria-label="' + (on ? "To'xtatish" : "Tinglash") + '">' + (on ? I.stop : I.sound) + "</button>" +
         '<div class="grow"><b>' + esc(tag.replace("-", " - ")) + '</b><div class="muted small">' + pad(dt.getDate()) + "." + pad(dt.getMonth() + 1) + " " + pad(dt.getHours()) + ":" + pad(dt.getMinutes()) + " · " + m + ":" + pad(s) + "</div></div>" +
+        (!A ? '<button class="btn ghost sm" data-dl="' + esc(r.name) + '">Yuklab olish</button>' : "") +
         '<button class="btn ghost sm" data-del="' + esc(r.name) + '">O\'chirish</button></div>';
     });
     h += "</section>";
@@ -272,12 +491,32 @@
     return h;
   }
 
+  function vMic() {
+    var h = '<section class="card"><h2>Mikrofon</h2><div class="muted small">Fifine USB mikrofonini ulang: Poliglot uni o\'zi topib tanlaydi. Ovoz yozish shu tanlangan mikrofondan bo\'ladi.</div>';
+    var labeled = mic.devices.filter(function (d) { return d.label; });
+    if (!hasMD) h += '<div class="note">Bu brauzer mikrofonni qo\'llamaydi. Poliglot\'ni Edge yoki Chrome\'da oching.</div>';
+    else if (!labeled.length) h += '<div class="btns"><button class="btn acc" data-act="micFind">Mikrofonni topish</button></div><div class="muted small">Brauzer ruxsat so\'raydi: "Ruxsat berish" (Allow) ni bosing.</div>';
+    else {
+      h += '<label class="f" for="micSel">Qaysi mikrofon<select id="micSel">' + labeled.map(function (d) {
+        return '<option value="' + esc(d.deviceId) + '"' + (d.deviceId === S.mic ? " selected" : "") + ">" + esc(d.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "")) + "</option>";
+      }).join("") + "</select></label>";
+      var fif = labeled.some(isFifine), sel = labeled.filter(function (d) { return d.deviceId === S.mic; })[0];
+      if (sel && isFifine(sel)) h += '<div><span class="pill ok">Fifine tanlangan</span></div>';
+      else if (!fif) h += '<div class="note">Fifine topilmadi. USB kabelini ulang, keyin ro\'yxat o\'zi yangilanadi.</div>';
+      h += '<div class="meter"><i id="testMeter"></i></div><div class="btns"><button class="btn ' + (mic.testing ? "" : "acc") + '" data-act="micTest">' + (mic.testing ? "To'xtatish" : "Ovozni sinash") + "</button></div>" +
+        '<div class="muted small">Gapirganda chiziq yarmigacha chiqsin. Qizarsa — Fifine\'dagi GAIN (ovoz kuchi) murvatini kamaytiring, juda past bo\'lsa — oshiring. Mikrofonga 10-15 sm masofada gapiring.</div>';
+    }
+    h += '<div class="note"><b>Talaffuzni tekshirish</b> (mikrofon tugmasi) brauzerning asosiy mikrofonini ishlatadi. Fifine\'ni asosiy qiling: Windows <b>Sozlamalar → Tizim → Ovoz → Kirish (Input)</b> → Fifine. Internet kerak.</div></section>';
+    return h;
+  }
+
   function vSet() {
-    var h = '<section class="card"><h2>Kunlik eslatma</h2><div class="muted small">Har kuni shu vaqtda telefon sizga bugungi vazifani eslatadi.</div>' +
+    var h = A ? "" : vMic();
+    h += '<section class="card"><h2>Kunlik eslatma</h2><div class="muted small">' + (A ? "Har kuni shu vaqtda telefon sizga bugungi vazifani eslatadi." : "Kompyuterda eslatma faqat Poliglot oynasi ochiq turganda keladi.") + '</div>' +
       '<label class="f" for="remt">Vaqt<input id="remt" type="time" value="' + esc(S.rem) + '"></label>' +
       '<div class="btns"><button class="btn acc" data-act="remOn">' + (S.remOn ? "Vaqtni yangilash" : "Eslatmani yoqish") + '</button>' + (S.remOn ? '<button class="btn ghost" data-act="remOff">O\'chirish</button>' : "") + "</div>" +
-      '<div class="small ' + (S.remOn ? "" : "muted") + '">' + (S.remOn ? "Eslatma yoqilgan: har kuni " + esc(S.rem) : "Eslatma o'chiq") + "</div>" + (A ? "" : '<div class="note">Eslatma APK ilovada ishlaydi.</div>') + "</section>";
-    h += '<section class="card"><h2>Arab ovozi</h2><div class="muted small">Arabcha so\'zlarni eshitish uchun telefonda arab ovozi o\'rnatilgan bo\'lishi kerak.</div><div class="btns"><button class="btn ghost" data-speak="السَّلَامُ عَلَيْكُمْ" data-lang="ar">Tekshirish</button><button class="btn ghost" data-act="arHelp">Qanday o\'rnatiladi?</button></div></section>';
+      '<div class="small ' + (S.remOn ? "" : "muted") + '">' + (S.remOn ? "Eslatma yoqilgan: har kuni " + esc(S.rem) : "Eslatma o'chiq") + "</div></section>";
+    h += '<section class="card"><h2>Arab ovozi</h2><div class="muted small">Arabcha so\'zlarni eshitish uchun ' + (A ? "telefonda" : "kompyuterda") + ' arab ovozi o\'rnatilgan bo\'lishi kerak.</div><div class="btns"><button class="btn ghost" data-speak="السَّلَامُ عَلَيْكُمْ" data-lang="ar">Tekshirish</button><button class="btn ghost" data-act="arHelp">Qanday o\'rnatiladi?</button></div></section>';
     h += '<section class="card"><h2>Speakingni oshirish qoidalari</h2><ol class="rules">' +
       "<li><b>Har kuni ovoz chiqarib gapiring.</b> Ichingizda emas, baland ovozda.</li>" +
       "<li><b>O'zingizni yozib, tinglang.</b> Xatolar eshitilganda tuzaladi.</li>" +
@@ -285,21 +524,22 @@
       "<li><b>Tayyor iboralar.</b> So'zni emas, butun iborani yodlang.</li>" +
       "<li><b>Jonli suhbat.</b> Haftada kamida 3 marta odam yoki Claude bilan gaplashing.</li>" +
       "<li><b>Muntazamlik.</b> Har kuni 30 daqiqa haftada bir 3 soatdan foydaliroq.</li></ol></section>";
-    h += '<section class="card"><h2>Ma\'lumotlar</h2><div class="muted small">Dastur ' + fmtDate(S.start) + " kuni boshlangan. Hamma ma'lumot shu telefonda saqlanadi.</div>" +
-      '<div class="btns"><button class="btn ghost" data-act="reset">Progressni boshidan boshlash</button></div></section>';
+    h += '<section class="card"><h2>Ma\'lumotlar</h2><div class="muted small">Dastur ' + fmtDate(S.start) + " kuni boshlangan. Hamma ma'lumot shu " + (A ? "telefonda" : "kompyuterda") + " saqlanadi. Telefon va kompyuter progressi alohida: birini ikkinchisiga ko'chirish mumkin.</div>" +
+      '<div class="btns"><button class="btn ghost" data-act="sync">Progressni ko\'chirish</button><button class="btn ghost" data-act="reset">Progressni boshidan boshlash</button></div></section>';
     return h;
   }
 
   // ---------- pastki oyna (sheet) ----------
   function openSheet(kind) { ui.sheet = kind; renderSheet(); }
-  function closeSheet() { ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
+  function closeSheet() { if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
   function renderSheet() {
     var L = $("#layer"), h = "";
     if (!ui.sheet) { L.innerHTML = ""; return; }
     if (ui.sheet === "check" && ui.check) {
       var c = ui.check, ar = c.lang === "ar";
       h = "<h2>Talaffuzni tekshirish</h2><div class=\"muted small\">Ibora:</div><div class=\"" + (ar ? "arw" : "p") + '" style="font-weight:700;font-size:' + (ar ? 30 : 18) + 'px">' + esc(c.text) + "</div>";
-      if (c.heard == null) h += '<div class="muted">Gapiring... (Google oynasi ochiladi)</div>';
+      if (c.heard == null) h += c.listening ? '<div class="listen"><i></i>' + (A ? "Gapiring... (Google oynasi ochiladi)" : "Gapiring... mikrofon tinglayapti") + "</div>"
+        : '<div class="muted">Ovoz eshitilmadi. «Qayta aytish» ni bosib, aniq va balandroq ayting.</div>';
       else {
         var sc = scoreOf(c.text, c.heard, c.lang);
         h += '<div class="score" style="color:' + (sc.pct >= 80 ? "var(--ok)" : sc.pct >= 50 ? "var(--accent)" : "#C0392B") + '">' + sc.pct + "%</div>" +
@@ -313,6 +553,13 @@
       h = '<h2>Gapirish taymeri</h2><div class="chips">' + [60, 120, 180, 300].map(function (s) { return '<button class="chip ' + (t.sec === s ? "on" : "") + '" data-tsec="' + s + '">' + s / 60 + " daq</button>"; }).join("") + "</div>" +
         '<div class="clock" id="tclock">' + pad(mm) + ":" + pad(ss) + '</div><div class="muted small" style="text-align:center">To\'xtamang. So\'z topolmasangiz, boshqacha ayting.</div>' +
         '<div class="btns"><button class="btn acc grow" data-act="tgo">' + (t.run ? "To'xtatish" : "Boshlash") + '</button><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else if (ui.sheet === "arvoice" && !A) {
+      h = "<h2>Kompyuterda arab ovozi</h2><ol class=\"rules\"><li><b>Eng osoni:</b> Poliglot'ni <b>Microsoft Edge</b>'da oching — unda arab ovozlari (Hamed, Zariyah) tayyor turadi.</li><li>Chrome'da: Windows <b>Sozlamalar → Vaqt va til → Nutq → Ovozlarni boshqarish → Ovoz qo'shish</b> → <b>العربية</b> ni o'rnating, keyin brauzerni qayta oching.</li></ol><div class=\"btns\"><button class=\"btn\" data-act=\"close\">Tushunarli</button></div>";
+    } else if (ui.sheet === "sync") {
+      h = "<h2>Progressni ko'chirish</h2><div class=\"muted small\">1) Eski qurilmada <b>Nusxa olish</b> ni bosing va kodni Telegram \"Saqlangan xabarlar\" ga yuboring. 2) Yangi qurilmada kodni pastdagi maydonga joylab, <b>Yuklash</b> ni bosing. Yangi qurilmadagi progress almashtiriladi.</div>" +
+        "<div class=\"btns\"><button class=\"btn acc\" data-act=\"syncCopy\">Nusxa olish</button></div>" +
+        "<label class=\"f\" for=\"syncIn\">Kodni shu yerga joylang<textarea id=\"syncIn\" placeholder=\"POLIGLOT:...\"></textarea></label>" +
+        "<div class=\"btns\"><button class=\"btn\" data-act=\"syncLoad\">Yuklash</button><button class=\"btn ghost\" data-act=\"close\">Yopish</button></div>";
     } else if (ui.sheet === "arvoice") {
       h = "<h2>Arab ovozini o'rnatish</h2><ol class=\"rules\"><li>Telefon <b>Sozlamalar</b> → <b>Tizim</b> (yoki Umumiy boshqaruv) → <b>Til va kiritish</b>.</li><li><b>Matnni nutqqa aylantirish</b> → <b>Google nutq xizmatlari</b> → sozlamalar (⚙).</li><li><b>Ovoz ma'lumotlarini o'rnatish</b> → <b>العربية (Arab)</b> → yuklab oling.</li><li>Poliglot'ga qaytib, so'zni qayta bosing.</li></ol><div class=\"muted small\">Talaffuzni tekshirish uchun ham Google ilovasi arab tilini tanishi kerak (Google → Sozlamalar → Ovoz → Oflayn nutqni tanish → Arab).</div><div class=\"btns\"><button class=\"btn\" data-act=\"close\">Tushunarli</button></div>";
     } else if (ui.sheet === "reset") {
@@ -351,7 +598,7 @@
     el.textContent = pad(Math.floor(s / 60)) + ":" + pad(s % 60);
   }
   function recToggle() {
-    if (!A) { toast("Ovoz yozish APK ilovada ishlaydi."); return; }
+    if (!A) { if (ui.recOn) webRecStop(); else webRecStart(); return; }
     if (ui.recOn) {
       var name = ""; try { name = A.stopRecording(); } catch (e) {}
       ui.recOn = false; clearInterval(ui.recTick);
@@ -395,7 +642,7 @@
     var b = e.target.closest("button,[data-act]"); if (!b) return;
     var ds = b.dataset;
     if (ds.act === "bg" && e.target !== b) return; // sheet ichini bosish yopmaydi
-    if (ds.tab) { ui.tab = ds.tab; if (ds.tab === "today") ui.day = ui.day || curDay(); render(); window.scrollTo(0, 0); return; }
+    if (ds.tab) { if (mic.testing && ds.tab !== "set") { mic.testing = false; stopMeter(); if (!ui.recOn) stopStream(); } ui.tab = ds.tab; if (ds.tab === "today") ui.day = ui.day || curDay(); render(); window.scrollTo(0, 0); return; }
     if (ds.speak) { speak(ds.speak, ds.lang); return; }
     if (ds.check) { startCheck(ds.check, ds.lang); return; }
     if (ds.day) { var nd = +ds.day; if (nd >= 1 && nd <= 30) { ui.day = nd; render(); window.scrollTo(0, 0); } return; }
@@ -419,7 +666,11 @@
     if (ds.plang) { ui.phrLang = ds.plang; ui.cat = "all"; ui.card = 0; ui.flip = false; render(); return; }
     if (ds.cat) { ui.cat = ds.cat; ui.card = 0; ui.flip = false; render(); return; }
     if (ds.tsec) { ui.timer.sec = ui.timer.left = +ds.tsec; if (ui.timer.run) { clearInterval(ui.timer.h); ui.timer.run = false; } renderSheet(); return; }
-    if (ds.play) { if (ui.playing === ds.play) A.stopPlay(); else A.play(ds.play); return; }
+    if (ds.play) {
+      if (!A) { if (ui.playing === ds.play) webStopPlay(); else webPlay(ds.play); return; }
+      if (ui.playing === ds.play) A.stopPlay(); else A.play(ds.play); return;
+    }
+    if (ds.dl) { webDownload(ds.dl); return; }
     if (ds.del) { openSheet("del:" + ds.del); return; }
     switch (ds.act) {
       case "bg": case "close": closeSheet(); break;
@@ -436,30 +687,71 @@
         ui.flip = false; render(); break;
       }
       case "rec": recToggle(); break;
+      case "micFind": getMicStream().then(function () { if (!mic.testing && !ui.recOn) stopStream(); render(); }, micError); break;
+      case "micTest": micTest(); break;
+      case "sync": openSheet("sync"); break;
+      case "syncCopy": copyText("POLIGLOT:" + btoa(unescape(encodeURIComponent(JSON.stringify(S)))), "Kod nusxalandi. Uni ikkinchi qurilmaga yuboring."); break;
+      case "syncLoad": {
+        var raw = (($("#syncIn") || {}).value || "").trim().replace(/^POLIGLOT:/, ""), ns = null;
+        try { ns = JSON.parse(decodeURIComponent(escape(atob(raw)))); } catch (er) {}
+        if (!ns || ns.v !== 1 || !ns.en || !ns.ar) { toast("Kod noto'g'ri. To'liq nusxalanganini tekshiring."); break; }
+        var keepMic = { mic: S.mic, micLabel: S.micLabel, micManual: S.micManual };
+        S = ns; S.mic = keepMic.mic; S.micLabel = keepMic.micLabel; S.micManual = keepMic.micManual;
+        save(); ui.day = curDay(); closeSheet(); render(); toast("Progress yuklandi."); break;
+      }
       case "saveReport": readReport(); markActive(); save(); toast("Hisobot saqlandi."); break;
       case "sendReport": {
         readReport(); markActive(); save(); var txt = reportText();
         if (A) { try { A.share(txt); } catch (er) { A.copy(txt); toast("Nusxa olindi. Claude chatiga joylang."); } }
-        else if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { toast("Nusxa olindi. Claude chatiga joylang."); }, function () { toast("Nusxa olib bo'lmadi."); });
+        else copyText(txt, "Nusxa olindi. Claude chatiga joylang (Ctrl+V).");
         break;
       }
       case "remOn": {
         var v = ($("#remt") || {}).value || "20:00", hm = v.split(":");
         S.rem = v; S.remOn = true; save();
         if (A) { try { A.setReminder(+hm[0], +hm[1]); } catch (er) {} }
+        else if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission().then(function (p) { if (p !== "granted") toast("Bildirishnomaga ruxsat berilmadi: eslatma kelmaydi."); });
         toast("Eslatma: har kuni " + v); render(); break;
       }
       case "remOff": S.remOn = false; save(); if (A) { try { A.cancelReminder(); } catch (er) {} } render(); break;
       case "arHelp": openSheet("arvoice"); break;
       case "reset": openSheet("reset"); break;
       case "resetYes": S.en = {}; S.ar = {}; S.active = []; S.reports = {}; S.known = { en: [], ar: [] }; S.doneAt = {}; S.start = today(); save(); ui.day = 1; closeSheet(); render(); break;
-      case "delYes": { var nm = ui.sheet.slice(4); try { A.deleteRecording(nm); } catch (er) {} closeSheet(); render(); break; }
+      case "delYes": {
+        var nm = ui.sheet.slice(4);
+        if (!A) { if (ui.playing === nm) webStopPlay(); closeSheet(); idb("readwrite", function (st) { return st.delete(nm); }).then(loadRecs, loadRecs); break; }
+        try { A.deleteRecording(nm); } catch (er) {} closeSheet(); render(); break;
+      }
     }
   });
   document.addEventListener("change", function (e) {
     if (e.target.id === "rmin" || e.target.id === "rnote") { readReport(); save(); }
+    if (e.target.id === "micSel") {
+      var o = e.target.options[e.target.selectedIndex];
+      S.mic = e.target.value; S.micLabel = o ? o.text : ""; S.micManual = true; save();
+      if (mic.testing) { stopMeter(); stopStream(); getMicStream().then(function (st) { render(); startMeter(st, "testMeter"); }, micError); } else render();
+    }
+  });
+  // klaviatura (kompyuter): Esc — oynani yopish, Space — yozish / kartani ag'darish
+  document.addEventListener("keydown", function (e) {
+    if (A) return;
+    var tg = e.target && e.target.tagName;
+    if (tg === "INPUT" || tg === "TEXTAREA" || tg === "SELECT") return;
+    if (e.key === "Escape" && ui.sheet) { closeSheet(); return; }
+    if (e.key === " " && !ui.sheet) {
+      if (ui.tab === "rec") { e.preventDefault(); recToggle(); }
+      else if (ui.tab === "cards") { e.preventDefault(); ui.flip = !ui.flip; render(); }
+    }
   });
 
+  if (!A) {
+    document.documentElement.classList.add("web");
+    loadRecs(); refreshMics();
+    if (hasMD && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", refreshMics);
+    if ("speechSynthesis" in window) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = function () {}; }
+    setInterval(webReminderTick, 30000); webReminderTick();
+    if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(function () {});
+  }
   render();
   pushStatus();
 })();
