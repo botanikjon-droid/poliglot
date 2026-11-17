@@ -150,6 +150,19 @@ select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10
 .phrbox .phr{border-bottom-color:rgba(168,64,26,.15);align-items:flex-start}
 .ex{font-size:15px;line-height:1.4;color:var(--ink)}
 .ex b{color:#A8401A}
+.story{font-size:17px;line-height:1.75;margin:10px 0}
+.w{all:unset;cursor:pointer;font-weight:700;border-radius:4px;padding:0 2px}
+.w.new,.lg.new{color:#A8401A;background:var(--accent-soft)}
+.w.rev,.lg.rev{color:var(--ok);text-decoration:underline;text-decoration-style:dotted}
+.lg{padding:0 3px;border-radius:4px}
+.hadith{background:var(--ok-soft);border-left:4px solid var(--ok);border-radius:10px;padding:10px 12px;margin:10px 0}
+.hadith .hen{font-weight:600;font-style:italic}
+.hadith .huz{margin:4px 0}
+.retell{background:var(--accent-soft);border-radius:10px;padding:10px 12px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px}
+.chip{border:1px solid rgba(0,0,0,.12);background:#fff;border-radius:99px;padding:6px 10px;font-size:14px;cursor:pointer}
+.chip.on{background:#FDECEA;border-color:#C0392B;color:#C0392B}
+.chip.rev{background:var(--ok-soft);border-color:var(--ok)}
 .ex.big{font-size:20px;line-height:1.4;font-weight:500}
 .pbtns{display:flex;gap:6px;flex:none}
 .flash .f2.big{font:700 22px/1.3 var(--display);color:#fff}
@@ -175,6 +188,7 @@ select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10
 <nav class="tabs" id="tabs"></nav>
 <div id="layer"></div>
 <script src="data.js"></script>
+<script src="stories.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

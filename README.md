@@ -8,6 +8,7 @@ Ingliz tili (B1, speaking) va arab tili (0 dan) uchun 30 kunlik Android ilova.
 - Kartochkalar: ingliz iboralar, arab harflari, arab iboralar
 - Kunlik seriya, daqiqalar, talaffuz balli grafigi
 - Kunlik eslatma (bildirishnoma) va hisobotni Claude'ga yuborish
+- Kun hikoyalari (1–7-kun): so'zlar takrorlanadigan ibratli, hadis asosidagi hikoyalar (manbasi bilan); oldingi kun so'zlari +1, +3, +6, +13, +29-kunlarda yana chiqadi; "unutdim" belgisi va takrorlash ro'yxati (`stories.js`)
 
 ## APK
 Har `main` ga push qilinganda GitHub Actions APK yig'adi:

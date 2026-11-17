@@ -98,7 +98,7 @@ var EN_DAYS = [
   ["Final talk", ["Speak for 5 minutes: who you are, what you do, what you love, your opinion on one topic, and your plans.", "Listen to your Day 1 recording. What has changed?"], "flu"]
 ];
 
-function enTasks(d) {
+function enBaseTasks(d) {
   var w = weekOf(d);
   if (d === 29) return [
     { t: "10 savolga javob", m: 12, d: "Har savolga 1 daqiqadan javob bering. Taymerni 1 daqiqaga qo'ying.", a: "timer" },

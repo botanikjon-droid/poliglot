@@ -10,6 +10,7 @@
     return null;
   }
   var S = load() || { v: 1, start: today(), en: {}, ar: {}, active: [], reports: {}, known: { en: [], ar: [] }, rem: "20:00", remOn: false, doneAt: {} };
+  if (!S.forgot) S.forgot = {}; // unutilgan so`zlar: { soz: kun }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} pushStatus(); }
 
   var ui = { tab: "today", day: curDay(), cat: "all", card: 0, flip: false, arMode: "letters", phrLang: "en",
@@ -368,6 +369,7 @@
     else if (t.a === "rec") act = '<button class="btn ghost sm" data-go="rec">Yozish</button>';
     else if (t.a === "report") act = '<button class="btn ghost sm" data-go="report">Hisobot</button>';
     else if (t.a === "arcards") act = '<button class="btn ghost sm" data-go="arcards">Kartochkalar</button>';
+    else if (t.a === "story") act = '<button class="btn ghost sm" data-go="story">Hikoyaga o\'tish</button>';
     return '<div class="task ' + (done ? "done" : "") + '"><button class="check" data-toggle="' + tr + "|" + d + "|" + i + '" aria-label="Bajarildi">' + I.tick + '</button>' +
       '<div class="grow"><div class="row"><span class="tt grow">' + esc(t.t) + '</span><span class="muted small">' + t.m + " daq</span></div>" +
       '<div class="td">' + esc(t.d) + "</div>" + (act ? '<div class="btns" style="margin-top:6px">' + act + "</div>" : "") + "</div></div>";
@@ -383,6 +385,38 @@
       "</button>";
   }
 
+  // ---------- kun hikoyasi ----------
+  function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  function forgotBefore(d) { return Object.keys(S.forgot).filter(function (k) { return S.forgot[k] < d; }); }
+  function storyHtml(d) {
+    var s = STORIES[d]; if (!s) return "";
+    var map = {}, fu = S.forgotUz || {};
+    storyReviewWords(d).forEach(function (x) { map[x.en.toLowerCase()] = { uz: x.uz, c: "rev" }; });
+    forgotBefore(d).forEach(function (k) { if (!map[k.toLowerCase()]) map[k.toLowerCase()] = { uz: fu[k] || "", c: "rev" }; });
+    s.w.forEach(function (x) { map[x[0].toLowerCase()] = { uz: x[1], c: "new" }; });
+    var keys = Object.keys(map).sort(function (a, b) { return b.length - a.length; });
+    var re = new RegExp("\\b(" + keys.map(reEsc).join("|") + ")\\b", "gi");
+    var body = "", last = 0, m;
+    while ((m = re.exec(s.text))) {
+      var k = map[m[0].toLowerCase()];
+      body += esc(s.text.slice(last, m.index)) + '<button class="w ' + k.c + '" data-mean="' + esc(m[0] + " — " + k.uz) + '">' + esc(m[0]) + "</button>";
+      last = m.index + m[0].length;
+    }
+    body += esc(s.text.slice(last));
+    var h = '<section class="card" id="story"><div class="row"><span class="pill en">Kun hikoyasi</span><span class="grow"></span>' + speakBtn(s.text, "en") + "</div>" +
+      "<h2>" + esc(s.title) + '</h2><div class="muted small"><b class="lg new">Yangi so\'zlar</b> · <b class="lg rev">Takrorlanadigan so\'zlar</b> — so\'zni bossangiz, tarjimasi chiqadi.</div>' +
+      '<p class="story">' + body + "</p>";
+    if (s.hadith) h += '<div class="hadith"><div class="hen">' + esc(s.hadith.en) + '</div><div class="huz">' + esc(s.hadith.uz) + '</div><div class="muted small">' + esc(s.hadith.src) + "</div></div>";
+    h += '<h3>Savollar</h3><ol class="qs">' + s.q.map(function (q) { return "<li>" + esc(q) + "</li>"; }).join("") + "</ol>" +
+      '<h3>O\'zingiz haqida qayta ayting</h3><div class="retell">' + esc(s.retell) + "</div>" +
+      '<h3>Bugungi so\'zlar</h3><div class="muted small">Eslay olmagan so\'zingizni bosib belgilang — u keyingi kunlarda yana chiqadi.</div><div class="chips">' +
+      s.w.map(function (x) { var f = S.forgot[x[0]] != null; return '<button class="chip ' + (f ? "on" : "") + '" data-forgot="' + esc(x[0]) + '" data-fuz="' + esc(x[1]) + '"><b>' + esc(x[0]) + "</b> " + esc(x[1]) + (f ? " · unutdim" : "") + "</button>"; }).join("") + "</div>";
+    var fb = forgotBefore(d);
+    if (fb.length) h += '<h3>Takrorlang: oldin unutilgan so\'zlar</h3><div class="muted small">Eslasangiz, bosing — ro\'yxatdan chiqadi.</div><div class="chips">' +
+      fb.map(function (k) { return '<button class="chip rev" data-remember="' + esc(k) + '"><b>' + esc(k) + "</b> " + esc(fu[k] || "") + " · esladim ✓</button>"; }).join("") + "</div>";
+    return h + "</section>";
+  }
+
   function vToday() {
     var d = ui.day, w = weekOf(d), wk = WEEKS[w - 1], en = EN_DAYS[d], ar = AR_DAYS[d];
     var tot = dayTotal(d), cnt = dayCount(d), pct = Math.round(cnt * 100 / tot);
@@ -393,6 +427,8 @@
       '<button class="iconbtn" data-day="' + (d + 1) + '" ' + (d >= 30 ? "disabled" : "") + ' aria-label="Keyingi kun">' + I.right + "</button></div>" +
       '<div class="bar"><i style="width:' + pct + '%"></i></div><div class="row small muted"><span class="grow">' + cnt + " / " + tot + " vazifa · ~" + (enMin + arMin) + " daqiqa</span>" +
       (dayDone(d) ? '<span class="pill ok">Kun bajarildi</span>' : d === curDay() ? '<span class="pill en">Bugungi kun</span>' : "") + "</div></section>";
+
+    h += storyHtml(d);
 
     // Ingliz
     h += '<section class="card"><div class="row"><span class="pill en">Ingliz tili · B1</span><span class="muted small grow" style="text-align:right">' + enMin + " daq</span></div>" +
@@ -684,6 +720,7 @@
       "Ingliz (" + EN_DAYS[d][0] + "): " + ec + "/" + en.length + " vazifa\n" +
       "Arab (" + AR_DAYS[d].t + "): " + ac + "/" + ar.length + " vazifa\n" +
       "Vaqt: " + (r.min != null ? r.min : "?") + " daqiqa · Ravonlik: " + (r.rate || "?") + "/5\n" +
+      "Unutilgan so'zlar: " + (Object.keys(S.forgot).filter(function (k) { return S.forgot[k] === d; }).join(", ") || "—") + "\n" +
       "Seriya: " + streak() + " kun · Bajarilgan kunlar: " + doneDays() + "/30\n" +
       "Izoh: " + (r.note || "—");
   }
@@ -702,6 +739,13 @@
     if (ds.act === "bg" && e.target !== b) return; // sheet ichini bosish yopmaydi
     if (ds.tab) { if (mic.testing && ds.tab !== "set") { mic.testing = false; stopMeter(); if (!ui.recOn) stopStream(); } ui.tab = ds.tab; if (ds.tab === "today") ui.day = ui.day || curDay(); render(); window.scrollTo(0, 0); return; }
     if (ds.speak) { speak(ds.speak, ds.lang); return; }
+    if (ds.mean) { toast(ds.mean); return; }
+    if (ds.forgot) {
+      S.forgotUz = S.forgotUz || {};
+      if (S.forgot[ds.forgot] != null) { delete S.forgot[ds.forgot]; } else { S.forgot[ds.forgot] = ui.day; S.forgotUz[ds.forgot] = ds.fuz; }
+      save(); render(); var so = document.getElementById("story"); if (so) so.scrollIntoView(); return;
+    }
+    if (ds.remember) { delete S.forgot[ds.remember]; markActive(); save(); render(); var sr = document.getElementById("story"); if (sr) sr.scrollIntoView(); toast("Barakalla!"); return; }
     if (ds.check) { startCheck(ds.check, ds.lang); return; }
     if (ds.day) { var nd = +ds.day; if (nd >= 1 && nd <= 30) { ui.day = nd; render(); window.scrollTo(0, 0); } return; }
     if (ds.open) { ui.day = +ds.open; ui.tab = "today"; render(); window.scrollTo(0, 0); return; }
@@ -716,6 +760,7 @@
       if (ds.go === "phr") startShadow();
       else if (ds.go === "timer") openSheet("timer");
       else if (ds.go === "rec") { ui.tab = "rec"; render(); window.scrollTo(0, 0); }
+      else if (ds.go === "story") { var st = document.getElementById("story"); if (st) st.scrollIntoView({ behavior: "smooth" }); }
       else if (ds.go === "report") { var r = document.getElementById("report"); if (r) r.scrollIntoView({ behavior: "smooth" }); }
       else if (ds.go === "arcards") { ui.tab = "cards"; ui.phrLang = "ar"; ui.cat = "all"; ui.card = 0; ui.flip = false; render(); window.scrollTo(0, 0); }
       return;
@@ -779,7 +824,7 @@
       case "remOff": S.remOn = false; save(); if (A) { try { A.cancelReminder(); } catch (er) {} } render(); break;
       case "arHelp": openSheet("arvoice"); break;
       case "reset": openSheet("reset"); break;
-      case "resetYes": S.en = {}; S.ar = {}; S.active = []; S.reports = {}; S.known = { en: [], ar: [] }; S.doneAt = {}; S.start = today(); save(); ui.day = 1; closeSheet(); render(); break;
+      case "resetYes": S.en = {}; S.ar = {}; S.active = []; S.reports = {}; S.known = { en: [], ar: [] }; S.doneAt = {}; S.forgot = {}; S.forgotUz = {}; S.start = today(); save(); ui.day = 1; closeSheet(); render(); break;
       case "delYes": {
         var nm = ui.sheet.slice(4);
         if (!A) { if (ui.playing === nm) webStopPlay(); closeSheet(); idb("readwrite", function (st) { return st.delete(nm); }).then(loadRecs, loadRecs); break; }
