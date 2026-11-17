@@ -41,7 +41,7 @@
 
   function phrasesFor(d) {
     var cat = EN_DAYS[d][2];
-    var list = EN_PHR.map(function (p, i) { return { i: i, c: p[0], p: p[1], u: p[2] }; }).filter(function (x) { return x.c === cat; });
+    var list = EN_PHR.map(function (p, i) { return { i: i, c: p[0], p: p[1], u: p[2], e: p[3] || p[1], eu: p[4] || p[2] }; }).filter(function (x) { return x.c === cat; });
     var start = (d * 3) % list.length, out = [];
     for (var k = 0; k < Math.min(4, list.length); k++) out.push(list[(start + k) % list.length]);
     return out;
@@ -257,6 +257,7 @@
     return { pct: t.length ? Math.round(ok * 100 / t.length) : 0, words: res };
   }
   function startCheck(text, lang) {
+    if (ui.sh) { shClear(); ui.sh = null; }
     ui.check = { text: text, lang: lang, heard: null };
     openSheet("check");
     listen();
@@ -331,6 +332,19 @@
     stop: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
   };
   function speakBtn(text, lang) { return '<button class="iconbtn speak" data-speak="' + esc(text) + '" data-lang="' + lang + '" aria-label="Tinglash">' + I.sound + "</button>"; }
+  // misol gapda iborani ajratib ko'rsatish
+  function hlEx(ex, phr) {
+    var h = esc(ex);
+    phr.split("...").map(function (x) { return x.replace(/^[\s,]+|[\s,.!?]+$/g, ""); }).filter(function (x) { return x.length > 1; }).forEach(function (part) {
+      var e = esc(part).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      h = h.replace(new RegExp(e, "i"), function (m) { return "<b>" + m + "</b>"; });
+    });
+    return h;
+  }
+  function phrRow(p) {
+    return '<div class="phr"><div class="grow"><div class="ex">' + hlEx(p.e, p.p) + '</div><div class="muted small">' + esc(p.eu) + "</div></div>" +
+      '<div class="pbtns">' + speakBtn(p.e, "en") + checkBtn(p.e, "en") + "</div></div>";
+  }
   function checkBtn(text, lang) { return '<button class="iconbtn" data-check="' + esc(text) + '" data-lang="' + lang + '" aria-label="Talaffuzni tekshirish">' + I.mic + "</button>"; }
 
   // ---------- render ----------
@@ -349,7 +363,7 @@
   function taskRow(tr, d, i, t) {
     var done = !!(S[tr][d] || [])[i];
     var act = "";
-    if (t.a === "phr") act = '<button class="btn ghost sm" data-go="phr">Iboralar</button>';
+    if (t.a === "phr") act = '<button class="btn ghost sm" data-go="phr">Shadowing</button>';
     else if (t.a === "timer") act = '<button class="btn ghost sm" data-go="timer">Taymer</button>';
     else if (t.a === "rec") act = '<button class="btn ghost sm" data-go="rec">Yozish</button>';
     else if (t.a === "report") act = '<button class="btn ghost sm" data-go="report">Hisobot</button>';
@@ -383,10 +397,9 @@
     // Ingliz
     h += '<section class="card"><div class="row"><span class="pill en">Ingliz tili · B1</span><span class="muted small grow" style="text-align:right">' + enMin + " daq</span></div>" +
       "<h2>" + esc(en[0]) + '</h2><ol class="qs">' + en[1].map(function (q) { return "<li>" + esc(q) + "</li>"; }).join("") + "</ol>" +
-      enT.map(function (t, i) { return taskRow("en", d, i, t); }).join("") +
-      '<h3 id="phr">Kun iboralari</h3><div>' + phrasesFor(d).map(function (p) {
-        return '<div class="phr"><div class="grow"><div class="p">' + esc(p.p) + '</div><div class="muted small">' + esc(p.u) + "</div></div>" + speakBtn(p.p, "en") + checkBtn(p.p, "en") + "</div>";
-      }).join("") + "</div></section>";
+      '<div class="phrbox" id="phr"><div class="row"><h3 class="grow">Kun iboralari — javobda ishlating</h3><button class="btn acc sm" data-act="shadow">Shadowing</button></div>' +
+      phrasesFor(d).map(phrRow).join("") + "</div>" +
+      enT.map(function (t, i) { return taskRow("en", d, i, t); }).join("") + "</section>";
 
     // Arab
     h += '<section class="card"><div class="row"><span class="pill ar">Arab tili · 0 dan</span><span class="muted small grow" style="text-align:right">' + arMin + " daq</span></div>" +
@@ -431,7 +444,8 @@
 
   function cardList() {
     if (ui.phrLang === "en") {
-      return EN_PHR.map(function (p, i) { return { id: i, c: p[0], f: p[1], b: p[2] }; }).filter(function (x) { return ui.cat === "all" || x.c === ui.cat || (ui.cat === "rep" && S.known.en.indexOf(x.id) < 0); });
+      var uzFirst = S.cardDir !== "en";
+      return EN_PHR.map(function (p, i) { return { id: i, c: p[0], f: uzFirst ? p[2] : p[1], b: uzFirst ? p[1] : p[2], en: p[1], ex: p[3] || "", exU: p[4] || "", uzf: uzFirst }; }).filter(function (x) { return ui.cat === "all" || x.c === ui.cat || (ui.cat === "rep" && S.known.en.indexOf(x.id) < 0); });
     }
     var out = [], seen = {}, cd = Math.max(curDay(), ui.day);
     for (var d = 1; d <= cd; d++) {
@@ -445,13 +459,17 @@
     var en = ui.phrLang === "en", list = cardList();
     if (ui.card >= list.length) ui.card = 0;
     var c = list[ui.card], known = S.known[ui.phrLang];
-    var h = '<div class="chips"><button class="chip ' + (en ? "on" : "") + '" data-plang="en">Ingliz</button><button class="chip ' + (!en ? "on" : "") + '" data-plang="ar">Arab</button></div>';
+    var h = '<div class="chips"><button class="chip ' + (en ? "on" : "") + '" data-plang="en">Ingliz</button><button class="chip ' + (!en ? "on" : "") + '" data-plang="ar">Arab</button>' +
+      (en ? '<span class="grow"></span><button class="chip" data-act="cardDir" aria-label="Yo\'nalishni almashtirish">' + (S.cardDir !== "en" ? "O'zbekcha → inglizcha" : "Inglizcha → o'zbekcha") + " ⇄</button>" : "") + "</div>";
     var cats = en ? [["all", "Hammasi"], ["rep", "Takrorlash"]].concat(Object.keys(EN_CATS).map(function (k) { return [k, EN_CATS[k]]; })) : [["all", "Hammasi"], ["rep", "Takrorlash"]];
     h += '<div class="chips">' + cats.map(function (x) { return '<button class="chip ' + (ui.cat === x[0] ? "on" : "") + '" data-cat="' + x[0] + '">' + x[1] + "</button>"; }).join("") + "</div>";
     if (!c) return h + '<section class="card"><h2>Bu yerda karta yo\'q</h2><div class="muted">"Takrorlash" bo\'sh bo\'lsa — hammasini bilasiz. Barakalla!</div></section>';
+    var uzf = en && c.uzf, sayTxt = en ? (c.ex || c.en) : c.f;
     h += '<button class="flash" data-act="flip"><div class="f1 ' + (en ? "" : "arabic") + '">' + esc(c.f) + "</div>" +
-      (ui.flip ? '<div class="f2">' + esc(c.b) + "</div>" : '<div class="hint">Ma\'nosini ayting, keyin ag\'daring</div>') + "</button>";
-    h += '<div class="row"><span class="muted small grow">' + (ui.card + 1) + " / " + list.length + " · bilaman: " + known.length + "</span>" + speakBtn(c.f, ui.phrLang) + checkBtn(c.f, ui.phrLang) + "</div>";
+      (ui.flip ? '<div class="f2' + (uzf ? " big" : "") + '">' + esc(c.b) + "</div>" + (en && c.ex ? '<div class="f3"><div>' + hlEx(c.ex, c.en) + '</div><span>' + esc(c.exU) + "</span></div>" : "")
+        : '<div class="hint">' + (uzf ? "Inglizchasini ovoz chiqarib ayting, keyin ag'daring" : "Ma'nosini ayting, keyin ag'daring") + "</div>") + "</button>";
+    h += '<div class="row"><span class="muted small grow">' + (ui.card + 1) + " / " + list.length + " · bilaman: " + known.length + "</span>" +
+      (uzf && !ui.flip ? "" : speakBtn(sayTxt, ui.phrLang) + checkBtn(sayTxt, ui.phrLang)) + "</div>";
     h += '<div class="btns"><button class="btn ghost grow" data-act="again">Takrorlash</button><button class="btn grow" style="background:var(--ok)" data-act="know">Bilaman</button></div>';
     if (!en) {
       h += '<section class="card"><h2>Arab alifbosi</h2><div class="muted small">28 harf. Harfni bossangiz, misol so\'z o\'qiladi. Ikkinchi qatorda: alohida, boshida, o\'rtada, oxirida.</div><div class="argrid">' +
@@ -531,7 +549,7 @@
 
   // ---------- pastki oyna (sheet) ----------
   function openSheet(kind) { ui.sheet = kind; renderSheet(); }
-  function closeSheet() { if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
+  function closeSheet() { if (ui.sh) { shClear(); ui.sh = null; } if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
   function renderSheet() {
     var L = $("#layer"), h = "";
     if (!ui.sheet) { L.innerHTML = ""; return; }
@@ -548,10 +566,21 @@
           '<div class="muted small">' + (sc.pct >= 80 ? "Zo'r! Endi tezroq va tabiiyroq ayting." : "Qizil so'zlarni tinglab, sekin takrorlang, keyin yana tekshiring.") + "</div>";
       }
       h += '<div class="btns"><button class="btn ghost" data-speak="' + esc(c.text) + '" data-lang="' + c.lang + '">Tinglash</button><button class="btn acc" data-act="relisten">Qayta aytish</button><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else if (ui.sheet === "shadow" && ui.sh) {
+      var sh = ui.sh, it = sh.list[sh.i];
+      h = '<div class="row"><h2 class="grow">Shadowing</h2><span class="muted small">' + (sh.i + 1) + " / " + sh.list.length + "</span></div>" +
+        '<div class="muted small">Har gap 3 marta: avval tinglang, keyin pauzada ovoz chiqarib, xuddi shu ohangda takrorlang.</div>' +
+        '<div class="shbox"><div class="ex big">' + hlEx(it.e, it.p) + '</div><div class="muted small">' + esc(it.eu) + "</div></div>" +
+        '<div class="shstate ' + sh.phase + '">' + (sh.phase === "listen" ? "Tinglang..." : sh.phase === "you" ? "Endi siz ayting!" : "Pauza") + ' <span class="muted small">' + Math.min(sh.rep + 1, 3) + "/3</span></div>" +
+        '<div class="meter"><i id="shBar"></i></div>' +
+        '<div class="btns"><button class="btn ghost" data-act="shPrev"' + (sh.i === 0 ? " disabled" : "") + '>Oldingi</button><button class="btn acc grow" data-act="shPause">' + (sh.run ? "Pauza" : "Davom etish") + '</button><button class="btn ghost" data-act="shNext">Keyingi</button></div>' +
+        '<div class="btns"><button class="btn ghost" data-check="' + esc(it.e) + '" data-lang="en">Talaffuzni tekshirish</button><button class="btn ghost" data-act="close">Yopish</button></div>';
     } else if (ui.sheet === "timer") {
       var t = ui.timer, mm = Math.floor(t.left / 60), ss = t.left % 60;
       h = '<h2>Gapirish taymeri</h2><div class="chips">' + [60, 120, 180, 300].map(function (s) { return '<button class="chip ' + (t.sec === s ? "on" : "") + '" data-tsec="' + s + '">' + s / 60 + " daq</button>"; }).join("") + "</div>" +
         '<div class="clock" id="tclock">' + pad(mm) + ":" + pad(ss) + '</div><div class="muted small" style="text-align:center">To\'xtamang. So\'z topolmasangiz, boshqacha ayting.</div>' +
+        '<div class="cue"><b>' + esc(EN_DAYS[ui.day][0]) + '</b><ol class="qs">' + EN_DAYS[ui.day][1].map(function (q) { return "<li>" + esc(q) + "</li>"; }).join("") + "</ol>" +
+        '<div class="cuephr">' + phrasesFor(ui.day).map(function (p) { return "<span>" + esc(p.p) + "</span>"; }).join("") + "</div></div>" +
         '<div class="btns"><button class="btn acc grow" data-act="tgo">' + (t.run ? "To'xtatish" : "Boshlash") + '</button><button class="btn ghost" data-act="close">Yopish</button></div>';
     } else if (ui.sheet === "arvoice" && !A) {
       h = "<h2>Kompyuterda arab ovozi</h2><ol class=\"rules\"><li><b>Eng osoni:</b> Poliglot'ni <b>Microsoft Edge</b>'da oching — unda arab ovozlari (Hamed, Zariyah) tayyor turadi.</li><li>Chrome'da: Windows <b>Sozlamalar → Vaqt va til → Nutq → Ovozlarni boshqarish → Ovoz qo'shish</b> → <b>العربية</b> ni o'rnating, keyin brauzerni qayta oching.</li></ol><div class=\"btns\"><button class=\"btn\" data-act=\"close\">Tushunarli</button></div>";
@@ -569,6 +598,35 @@
     }
     L.innerHTML = '<div class="sheet-bg" data-act="bg"><div class="sheet" role="dialog">' + h + "</div></div>";
   }
+
+  // ---------- shadowing: tinglash → takrorlash, har gap 3 marta ----------
+  function shDur(t) { var w = t.split(/\s+/).length; return Math.round((w * 0.42 + 0.8) / 0.9 * 1000); }
+  function startShadow() {
+    var list = phrasesFor(ui.day);
+    ui.sh = { list: list, i: 0, rep: 0, phase: "pause", run: true, h: null, t0: 0, len: 0 };
+    openSheet("shadow"); shGo();
+  }
+  function shClear() { if (ui.sh && ui.sh.h) { clearTimeout(ui.sh.h); ui.sh.h = null; } if (ui.sh && ui.sh.bar) { cancelAnimationFrame(ui.sh.bar); ui.sh.bar = null; } }
+  function shBar(len) {
+    var sh = ui.sh; sh.t0 = Date.now(); sh.len = len;
+    (function f() { var el = document.getElementById("shBar"); if (el) el.style.width = Math.min(100, (Date.now() - sh.t0) * 100 / sh.len) + "%"; if (ui.sh === sh && sh.run) sh.bar = requestAnimationFrame(f); })();
+  }
+  function shGo() {
+    var sh = ui.sh; if (!sh || !sh.run || ui.sheet !== "shadow") return;
+    shClear();
+    var it = sh.list[sh.i], d = shDur(it.e);
+    sh.phase = "listen"; renderSheet(); speak(it.e, "en"); shBar(d);
+    sh.h = setTimeout(function () {
+      sh.phase = "you"; renderSheet(); shBar(Math.round(d * 1.3));
+      sh.h = setTimeout(function () {
+        sh.rep++;
+        if (sh.rep >= 3) { sh.rep = 0; if (sh.i < sh.list.length - 1) sh.i++; else { sh.run = false; sh.phase = "pause"; sh.i = 0; markActive(); save(); renderSheet(); toast("Barakalla! Shadowing tugadi. Endi savollarga javob bering."); return; } }
+        shGo();
+      }, Math.round(d * 1.3));
+    }, d + 300);
+  }
+  function shToggle() { var sh = ui.sh; if (!sh) return; sh.run = !sh.run; if (sh.run) shGo(); else { shClear(); sh.phase = "pause"; if ("speechSynthesis" in window) speechSynthesis.cancel(); renderSheet(); } }
+  function shStep(k) { var sh = ui.sh; if (!sh) return; sh.i = Math.max(0, Math.min(sh.list.length - 1, sh.i + k)); sh.rep = 0; sh.run = true; shGo(); }
 
   // ---------- taymer ----------
   var actx = null;
@@ -655,7 +713,7 @@
       save(); render(); return;
     }
     if (ds.go) {
-      if (ds.go === "phr") { var el = document.getElementById("phr"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      if (ds.go === "phr") startShadow();
       else if (ds.go === "timer") openSheet("timer");
       else if (ds.go === "rec") { ui.tab = "rec"; render(); window.scrollTo(0, 0); }
       else if (ds.go === "report") { var r = document.getElementById("report"); if (r) r.scrollIntoView({ behavior: "smooth" }); }
@@ -677,6 +735,11 @@
       case "relisten": listen(); break;
       case "tgo": timerToggle(); break;
       case "flip": ui.flip = !ui.flip; render(); break;
+      case "cardDir": S.cardDir = S.cardDir === "en" ? "uz" : "en"; save(); ui.flip = false; render(); break;
+      case "shadow": startShadow(); break;
+      case "shPause": shToggle(); break;
+      case "shNext": shStep(1); break;
+      case "shPrev": shStep(-1); break;
       case "know": case "again": {
         var list = cardList(), c = list[ui.card]; if (!c) break;
         var k = S.known[ui.phrLang], at = k.indexOf(c.id);
