@@ -1,6 +1,6 @@
 // Poliglot: internet bo'lmasa ham ochiladi; internet bo'lsa yangi versiyani oladi
-var C = "poliglot-v2";
-var FILES = ["./", "index.html", "app.js", "data.js", "stories.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+var C = "poliglot-v3";
+var FILES = ["./", "index.html", "app.js", "data.js", "stories.js", "dialogs.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", function (e) { e.waitUntil(caches.open(C).then(function (c) { return c.addAll(FILES); })); self.skipWaiting(); });
 self.addEventListener("activate", function (e) { e.waitUntil(self.clients.claim()); });
 self.addEventListener("fetch", function (e) {

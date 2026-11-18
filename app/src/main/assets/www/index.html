@@ -177,6 +177,14 @@ select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10
 .shstate.listen{color:var(--ar)}
 .shstate.you{color:var(--accent)}
 .shstate.pause{color:var(--muted)}
+.dlg{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.dl{text-align:left;border:0;border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:8px 10px;font:inherit;color:inherit;line-height:1.45}
+.dl.r1{border-left-color:#3B5BDB;background:#E5EAFD}
+.dl.cur{outline:2px solid var(--ink);font-weight:700}
+.role.r0{color:#A8401A}.role.r1{color:#3B5BDB}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.steps button.pill{border:0;font:inherit;font-size:12px;cursor:pointer}
+.uzans,.enans{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-weight:700;color:var(--ok);font-size:17px}
 </style>
 </head>
 <body>
@@ -189,6 +197,7 @@ select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10
 <div id="layer"></div>
 <script src="data.js"></script>
 <script src="stories.js"></script>
+<script src="dialogs.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -245,10 +245,19 @@
     } else toast("Bu qurilmada ovoz chiqarish yo'q.");
   }
 
+  // "what's" va "what is" bir xil hisoblanadi (talaffuzni tekshirishda)
+  function expandContractions(s) {
+    return s.replace(/\bcan't\b/g, "can not").replace(/\bwon't\b/g, "will not").replace(/\blet's\b/g, "let us")
+      .replace(/\b(\w+)n't\b/g, "$1 not").replace(/\bi'm\b/g, "i am").replace(/\b(\w+)'re\b/g, "$1 are")
+      .replace(/\b(\w+)'ve\b/g, "$1 have").replace(/\b(\w+)'ll\b/g, "$1 will").replace(/\b(\w+)'d\b/g, "$1 would")
+      .replace(/\b(it|that|what|where|who|how|there|here|he|she)'s\b/g, "$1 is");
+  }
   function norm(s, lang) {
     s = s.toLowerCase();
     if (lang === "ar") s = s.replace(/[ً-ْٰـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
-    s = s.replace(/\.\.\./g, " ").replace(/[^\p{L}\p{N}\s']/gu, " ");
+    s = s.replace(/\.\.\./g, " ").replace(/’/g, "'");
+    if (lang !== "ar") s = expandContractions(s);
+    s = s.replace(/[^\p{L}\p{N}\s']/gu, " ");
     return s.split(/\s+/).filter(Boolean);
   }
   function scoreOf(target, heard, lang) {
@@ -417,6 +426,126 @@
     return h + "</section>";
   }
 
+
+  // ---------- dialog: 1) tinglash  2) rollarda  3) inglizcha → o'zbekcha ma'nosi  4) o'zbekcha → inglizcha aytish ----------
+  var DLG_STAGES = ["Tinglash", "Rollarda", "Ma'nosini ayting", "Inglizcha ayting"];
+  var ROLE_PITCH = [0.85, 1.2];
+  function speakRole(text, role) {
+    var pitch = ROLE_PITCH[role] || 1;
+    if (A && A.speakAs) { try { A.speakAs(text, "en-US", 0.9, pitch); return; } catch (e) {} }
+    if (A) { speak(text, "en"); return; }
+    if ("speechSynthesis" in window) {
+      var u = new SpeechSynthesisUtterance(text), v = pickVoice("en");
+      u.lang = "en-US"; u.rate = 0.9; u.pitch = pitch; if (v) u.voice = v;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } else toast("Bu qurilmada ovoz chiqarish yo'q.");
+  }
+  function dlgRec(d) { S.dlg = S.dlg || {}; S.dlg[d] = S.dlg[d] || { s: [false, false, false, false], known: 0, total: 0, pct: null }; return S.dlg[d]; }
+  function dialogHtml(d) {
+    var g = typeof DIALOGS !== "undefined" && DIALOGS[d]; if (!g) return "";
+    var rec = (S.dlg || {})[d];
+    var steps = DLG_STAGES.map(function (t, i) { var ok = rec && rec.s[i]; return '<span class="pill ' + (ok ? "ok" : "") + '">' + (i + 1) + ". " + t + (ok ? " ✓" : "") + "</span>"; }).join(" ");
+    return '<section class="card" id="dialog"><div class="row"><span class="pill en">Kun dialogi</span><span class="grow"></span>' +
+      '<button class="btn acc sm" data-act="dlgStart">Mashqni boshlash</button></div>' +
+      "<h2>" + esc(g.title) + '</h2><div class="muted small">' + g.r.map(function (r, i) { return '<b class="role r' + i + '">' + esc(r[0]) + "</b> — " + esc(r[1]); }).join(" · ") +
+      '. Gapni bossangiz, o\'zbekchasi chiqadi.</div><div class="dlg">' +
+      g.l.map(function (x) { return '<button class="dl r' + x[0] + '" data-mean="' + esc(x[2]) + '"><b>' + esc(g.r[x[0]][0]) + ":</b> " + esc(x[1]) + "</button>"; }).join("") +
+      '</div><div class="steps">' + steps + "</div>" +
+      (rec && rec.total ? '<div class="muted small">Ma\'nosi: ' + rec.known + "/" + rec.total + (rec.pct != null ? " · Inglizcha aytish: " + rec.pct + "%" : "") + "</div>" : "") +
+      "</section>";
+  }
+  function lineDur(t) { return shDur(t) + 500; }
+  function dlgClear() { var dl = ui.dl; if (dl && dl.h) { clearTimeout(dl.h); dl.h = null; } }
+  function dlgStart(stage) {
+    dlgClear(); if (ui.sh) { shClear(); ui.sh = null; }
+    var d = ui.day, g = DIALOGS[d];
+    ui.dl = { d: d, g: g, stage: stage || 1, i: 0, role: null, run: stage === 1 || !stage, h: null, show: false, res: [], knew: [] };
+    ui.check = null; openSheet("dialog"); dlgGo();
+  }
+  // 1- va 2-bosqichda gaplar o'z-o'zidan o'qiladi; sizning gapingizda (2-bosqich) to'xtaydi.
+  function dlgGo() {
+    var dl = ui.dl; if (!dl || ui.sheet !== "dialog") return;
+    dlgClear(); ui.check = null;
+    if (dl.i >= dl.g.l.length) { dlgFinishStage(); return; }
+    var x = dl.g.l[dl.i];
+    if (dl.stage === 1) {
+      if (!dl.run) { renderSheet(); return; }
+      renderSheet(); speakRole(x[1], x[0]);
+      dl.h = setTimeout(function () { dl.i++; dlgGo(); }, lineDur(x[1]));
+    } else if (dl.stage === 2) {
+      if (dl.role == null) { renderSheet(); return; }
+      renderSheet();
+      if (x[0] !== dl.role) { speakRole(x[1], x[0]); dl.h = setTimeout(function () { dl.i++; dlgGo(); }, lineDur(x[1])); }
+    } else if (dl.stage === 3) {
+      dl.show = false; dl.peek = false; renderSheet(); speakRole(x[1], x[0]);
+    } else {
+      dl.show = false; renderSheet();
+    }
+  }
+  function dlgListen(text) { ui.check = { text: text, lang: "en", heard: null, listening: false }; listen(); }
+  function dlgFinishStage() {
+    var dl = ui.dl, rec = dlgRec(dl.d);
+    rec.s[dl.stage - 1] = true;
+    if (dl.stage === 3) { rec.known = dl.knew.filter(Boolean).length; rec.total = dl.g.l.length; }
+    if (dl.stage === 4) { var sc = dl.res.filter(function (v) { return v != null; }); rec.pct = sc.length ? Math.round(sc.reduce(function (a, b) { return a + b; }, 0) / sc.length) : null; }
+    markActive(); save();
+    dl.done = true; dl.run = false; renderSheet();
+  }
+  function dlgSheet() {
+    var dl = ui.dl, g = dl.g, n = g.l.length, h;
+    h = '<div class="row"><h2 class="grow">' + esc(g.title) + '</h2><span class="muted small">' + dl.stage + "/4 bosqich</span></div>" +
+      '<div class="steps">' + DLG_STAGES.map(function (t, i) { return '<button class="pill ' + (dl.stage === i + 1 ? "en" : "") + '" data-dlgstage="' + (i + 1) + '">' + (i + 1) + ". " + t + "</button>"; }).join(" ") + "</div>";
+    if (dl.done) {
+      var rec = dlgRec(dl.d), msg = dl.stage === 3 ? "Ma'nosini bildingiz: " + rec.known + "/" + rec.total : dl.stage === 4 ? "Inglizcha aytish: " + (rec.pct != null ? rec.pct + "%" : "—") : "Bosqich tugadi.";
+      h += '<div class="shbox"><div class="ex big">Barakalla!</div><div>' + esc(msg) + "</div></div>" +
+        '<div class="btns">' + (dl.stage < 4 ? '<button class="btn acc grow" data-dlgstage="' + (dl.stage + 1) + '">Keyingi bosqich: ' + DLG_STAGES[dl.stage] + "</button>" : "") +
+        '<button class="btn ghost" data-dlgstage="' + dl.stage + '">Qaytadan</button><button class="btn ghost" data-act="close">Yopish</button></div>';
+      return h;
+    }
+    var x = g.l[Math.min(dl.i, n - 1)], who = esc(g.r[x[0]][0]);
+    if (dl.stage === 1) {
+      h += '<div class="muted small">Lektor butun dialogni o\'qiydi. Tinglang va matnni kuzatib boring.</div><div class="dlg">' +
+        g.l.map(function (y, k) { return '<div class="dl r' + y[0] + (k === dl.i ? " cur" : "") + '"><b>' + esc(g.r[y[0]][0]) + ":</b> " + esc(y[1]) + "</div>"; }).join("") + "</div>" +
+        '<div class="btns"><button class="btn acc grow" data-act="dlgPause">' + (dl.run ? "Pauza" : "Davom etish") + '</button><button class="btn ghost" data-act="dlgNextStage">Keyingi bosqich</button></div>';
+    } else if (dl.stage === 2 && dl.role == null) {
+      h += '<div class="muted small">Qaysi rolni o\'ynaysiz? Lektor ikkinchi rolni aytadi, siz o\'z gaplaringizni ovoz chiqarib aytasiz.</div>' +
+        '<div class="btns">' + g.r.map(function (r, i) { return '<button class="btn ' + (i ? "" : "acc") + ' grow" data-dlgrole="' + i + '">' + esc(r[0]) + " (" + esc(r[1]) + ")</button>"; }).join("") + "</div>";
+    } else if (dl.stage === 2) {
+      var mine = x[0] === dl.role;
+      h += '<div class="muted small">' + (dl.i + 1) + " / " + n + " gap · Siz: <b>" + esc(g.r[dl.role][0]) + "</b></div>" +
+        '<div class="shbox dl r' + x[0] + '"><div class="muted small">' + who + '</div><div class="ex big">' + esc(x[1]) + '</div><div class="muted small">' + esc(x[2]) + "</div></div>" +
+        '<div class="shstate ' + (mine ? "you" : "listen") + '">' + (mine ? "Endi siz ayting!" : "Tinglang...") + "</div>" + dlgHeard(x[1]) +
+        (mine ? '<div class="btns"><button class="btn acc grow" data-act="dlgSay">Aytish (tekshirish)</button><button class="btn ghost" data-act="dlgHear">Namuna</button><button class="btn ghost" data-act="dlgNext">Keyingi</button></div>' : "") +
+        '<div class="btns"><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else if (dl.stage === 3) {
+      h += '<div class="muted small">' + (dl.i + 1) + " / " + n + " gap · Inglizcha gapni tinglang va o'zbekcha ma'nosini ovoz chiqarib ayting, keyin javobni oching.</div>" +
+        '<div class="shbox dl r' + x[0] + '"><div class="muted small">' + who + "</div>" +
+        (dl.show || dl.peek ? '<div class="ex big">' + esc(x[1]) + "</div>" : '<div class="ex big muted">🔊 Tinglang...</div>') +
+        (dl.show ? '<div class="uzans">' + esc(x[2]) + "</div>" : "") + "</div>" +
+        (dl.show ? '<div class="btns"><button class="btn grow" style="background:var(--ok)" data-dlgknew="1">Bildim ✓</button><button class="btn ghost grow" data-dlgknew="0">Bilmadim</button></div>'
+          : '<div class="btns"><button class="btn acc grow" data-act="dlgShow">Javobni ko\'rish</button><button class="btn ghost" data-act="dlgHear">Qayta tinglash</button>' +
+            (dl.peek ? "" : '<button class="btn ghost" data-act="dlgPeek">Matn</button>') + "</div>") +
+        '<div class="btns"><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else {
+      h += '<div class="muted small">' + (dl.i + 1) + " / " + n + " gap · O'zbekcha gapni inglizcha ayting. Telefon talaffuzingizni tekshiradi.</div>" +
+        '<div class="shbox dl r' + x[0] + '"><div class="muted small">' + who + '</div><div class="ex big">' + esc(x[2]) + "</div>" +
+        (dl.show ? '<div class="enans">' + esc(x[1]) + "</div>" : "") + "</div>" + dlgHeard(x[1]) +
+        '<div class="btns"><button class="btn acc grow" data-act="dlgSay">Inglizcha aytish</button>' +
+        (dl.show ? '<button class="btn ghost" data-act="dlgHear">Tinglash</button>' : '<button class="btn ghost" data-act="dlgShow">To\'g\'ri javob</button>') +
+        '<button class="btn ghost" data-act="dlgNext">Keyingi</button></div><div class="btns"><button class="btn ghost" data-act="close">Yopish</button></div>';
+    }
+    return h;
+  }
+  function dlgHeard(text) {
+    var c = ui.check; if (!c || c.text !== text) return "";
+    if (c.heard == null) return c.listening ? '<div class="listen"><i></i>Gapiring...</div>' : "";
+    var sc = scoreOf(text, c.heard, "en");
+    if (ui.dl && ui.dl.stage === 4) ui.dl.res[ui.dl.i] = Math.max(ui.dl.res[ui.dl.i] || 0, sc.pct);
+    return '<div class="score" style="color:' + (sc.pct >= 80 ? "var(--ok)" : sc.pct >= 50 ? "var(--accent)" : "#C0392B") + '">' + sc.pct + "%</div>" +
+      '<div class="small">' + sc.words.map(function (w) { return '<span class="' + (w.ok ? "hit" : "miss") + '">' + esc(w.w) + "</span>"; }).join(" ") + "</div>" +
+      '<div class="muted small">Telefon eshitdi: <b>' + esc(c.heard || "—") + "</b></div>";
+  }
+
   function vToday() {
     var d = ui.day, w = weekOf(d), wk = WEEKS[w - 1], en = EN_DAYS[d], ar = AR_DAYS[d];
     var tot = dayTotal(d), cnt = dayCount(d), pct = Math.round(cnt * 100 / tot);
@@ -429,6 +558,7 @@
       (dayDone(d) ? '<span class="pill ok">Kun bajarildi</span>' : d === curDay() ? '<span class="pill en">Bugungi kun</span>' : "") + "</div></section>";
 
     h += storyHtml(d);
+    h += dialogHtml(d);
 
     // Ingliz
     h += '<section class="card"><div class="row"><span class="pill en">Ingliz tili · B1</span><span class="muted small grow" style="text-align:right">' + enMin + " daq</span></div>" +
@@ -585,7 +715,7 @@
 
   // ---------- pastki oyna (sheet) ----------
   function openSheet(kind) { ui.sheet = kind; renderSheet(); }
-  function closeSheet() { if (ui.sh) { shClear(); ui.sh = null; } if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
+  function closeSheet() { if (ui.dl) { dlgClear(); ui.dl = null; } if (ui.sh) { shClear(); ui.sh = null; } if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
   function renderSheet() {
     var L = $("#layer"), h = "";
     if (!ui.sheet) { L.innerHTML = ""; return; }
@@ -602,6 +732,8 @@
           '<div class="muted small">' + (sc.pct >= 80 ? "Zo'r! Endi tezroq va tabiiyroq ayting." : "Qizil so'zlarni tinglab, sekin takrorlang, keyin yana tekshiring.") + "</div>";
       }
       h += '<div class="btns"><button class="btn ghost" data-speak="' + esc(c.text) + '" data-lang="' + c.lang + '">Tinglash</button><button class="btn acc" data-act="relisten">Qayta aytish</button><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else if (ui.sheet === "dialog" && ui.dl) {
+      h = dlgSheet();
     } else if (ui.sheet === "shadow" && ui.sh) {
       var sh = ui.sh, it = sh.list[sh.i];
       h = '<div class="row"><h2 class="grow">Shadowing</h2><span class="muted small">' + (sh.i + 1) + " / " + sh.list.length + "</span></div>" +
@@ -713,6 +845,13 @@
     if (no) r.note = no.value.trim();
     r.at = today(); S.reports[d] = r; return r;
   }
+  function dialogReportLine(d) {
+    var g = typeof DIALOGS !== "undefined" && DIALOGS[d], r = (S.dlg || {})[d];
+    if (!g) return "";
+    if (!r) return "Dialog (" + g.title + "): boshlanmagan\n";
+    return "Dialog (" + g.title + "): " + r.s.filter(Boolean).length + "/4 bosqich" +
+      (r.total ? " · ma'nosi " + r.known + "/" + r.total : "") + (r.pct != null ? " · inglizcha aytish " + r.pct + "%" : "") + "\n";
+  }
   function reportText() {
     var d = ui.day, r = S.reports[d] || {}, en = enTasks(d), ar = arTasks(d);
     var ec = (S.en[d] || []).filter(Boolean).length, ac = (S.ar[d] || []).filter(Boolean).length;
@@ -721,6 +860,7 @@
       "Arab (" + AR_DAYS[d].t + "): " + ac + "/" + ar.length + " vazifa\n" +
       "Vaqt: " + (r.min != null ? r.min : "?") + " daqiqa · Ravonlik: " + (r.rate || "?") + "/5\n" +
       "Unutilgan so'zlar: " + (Object.keys(S.forgot).filter(function (k) { return S.forgot[k] === d; }).join(", ") || "—") + "\n" +
+      dialogReportLine(d) +
       "Seriya: " + streak() + " kun · Bajarilgan kunlar: " + doneDays() + "/30\n" +
       "Izoh: " + (r.note || "—");
   }
@@ -747,6 +887,9 @@
     }
     if (ds.remember) { delete S.forgot[ds.remember]; markActive(); save(); render(); var sr = document.getElementById("story"); if (sr) sr.scrollIntoView(); toast("Barakalla!"); return; }
     if (ds.check) { startCheck(ds.check, ds.lang); return; }
+    if (ds.dlgstage) { dlgStart(+ds.dlgstage); return; }
+    if (ds.dlgrole) { ui.dl.role = +ds.dlgrole; ui.dl.i = 0; dlgGo(); return; }
+    if (ds.dlgknew) { var dk = ui.dl; dk.knew[dk.i] = ds.dlgknew === "1"; dk.i++; dlgGo(); return; }
     if (ds.day) { var nd = +ds.day; if (nd >= 1 && nd <= 30) { ui.day = nd; render(); window.scrollTo(0, 0); } return; }
     if (ds.open) { ui.day = +ds.open; ui.tab = "today"; render(); window.scrollTo(0, 0); return; }
     if (ds.toggle) {
@@ -782,6 +925,14 @@
       case "flip": ui.flip = !ui.flip; render(); break;
       case "cardDir": S.cardDir = S.cardDir === "en" ? "uz" : "en"; save(); ui.flip = false; render(); break;
       case "shadow": startShadow(); break;
+      case "dlgStart": dlgStart(1); break;
+      case "dlgPause": ui.dl.run = !ui.dl.run; if (ui.dl.run) dlgGo(); else { dlgClear(); renderSheet(); } break;
+      case "dlgNextStage": dlgClear(); dlgFinishStage(); break;
+      case "dlgNext": ui.dl.i++; dlgGo(); break;
+      case "dlgShow": ui.dl.show = true; renderSheet(); break;
+      case "dlgPeek": ui.dl.peek = true; renderSheet(); break;
+      case "dlgHear": { var hx = ui.dl.g.l[ui.dl.i]; if (hx) speakRole(hx[1], hx[0]); break; }
+      case "dlgSay": { var sx = ui.dl.g.l[ui.dl.i]; if (sx) dlgListen(sx[1]); break; }
       case "shPause": shToggle(); break;
       case "shNext": shStep(1); break;
       case "shPrev": shStep(-1); break;

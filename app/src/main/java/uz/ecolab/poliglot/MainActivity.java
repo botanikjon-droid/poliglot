@@ -98,6 +98,22 @@ public class MainActivity extends Activity {
                 return;
             }
             tts.setSpeechRate(rate);
+            tts.setPitch(1.0f);
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "poliglot");
+        }
+
+        /** Dialog: har bir rol o'z ovoz balandligi (pitch) bilan o'qiladi. */
+        @JavascriptInterface
+        public void speakAs(String text, String lang, float rate, float pitch) {
+            if (!ttsReady) { js("tts", "notready"); return; }
+            Locale loc = lang != null && lang.startsWith("ar") ? new Locale("ar") : Locale.US;
+            int r = tts.setLanguage(loc);
+            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                js("tts", "missing:" + (loc.getLanguage()));
+                return;
+            }
+            tts.setSpeechRate(rate);
+            tts.setPitch(Math.max(0.5f, Math.min(2.0f, pitch)));
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "poliglot");
         }
 
