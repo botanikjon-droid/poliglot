@@ -27,7 +27,7 @@ var STORIES = [
     title: "The best to his family",
     w: [["family", "oila"], ["wife", "turmush o'rtoq (xotin)"], ["father", "ota"], ["mother", "ona"], ["sons", "o'g'illar"], ["together", "birga"]],
     text: "My name is Karim. I live in a big house with my family. I have a wife and three sons. My father and mother live with us too. Every morning I wake up early and go to work. My work is hard, but I earn money for my family. In the evening I come home. I like to sit together with my family. One day my son asked: \"Father, why are you always kind to us?\" I said: \"The Prophet ﷺ said: The best of you are those who are best to their families.\" Now my sons help their mother every day. We are happy together.",
-    hadith: { en: "The best of you are those who are best to their families, and I am the best of you to my family.", uz: "Sizlarning eng yaxshingiz oilasiga eng yaxshi bo'lganingizdir. Men oilamga eng yaxshi bo'lganingizman.", src: "Termiziy rivoyati (Jome' at-Termiziy, 3895)" },
+    hadith: { en: "The best of you are those who are best to their families, and I am the best of you to my family.", uz: "Sizlarning eng yaxshingiz oilasiga eng yaxshi bo'lganingizdir. Men esa oilamga sizlarning eng yaxshingizman.", src: "Termiziy rivoyati (Jome' at-Termiziy, 3895)" },
     q: ["Who lives in Karim's house?", "What does Karim like to do in the evening?", "What do his sons do now?"],
     retell: "I have a family. My family is ___. In the evening we ___ together."
   },

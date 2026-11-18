@@ -15,12 +15,13 @@ android {
     }
 
     signingConfigs {
-        // Doimiy kalit: yangi versiya eskisining ustidan o'rnatiladi, progress o'chmaydi
+        // Doimiy kalit: yangi versiya eskisining ustidan o'rnatiladi, progress o'chmaydi.
+        // GitHub'da kalit POLIGLOT_KEYSTORE_B64 maxfiy qiymatidan olinadi (build.yml); repoda saqlanmaydi.
         poliglot {
-            storeFile file("poliglot.keystore")
-            storePassword "poliglot"
-            keyAlias "poliglot"
-            keyPassword "poliglot"
+            storeFile file(System.getenv("POLIGLOT_KEYSTORE_PATH") ?: "poliglot.keystore")
+            storePassword System.getenv("POLIGLOT_KEYSTORE_PASSWORD") ?: "poliglot"
+            keyAlias System.getenv("POLIGLOT_KEY_ALIAS") ?: "poliglot"
+            keyPassword System.getenv("POLIGLOT_KEY_PASSWORD") ?: System.getenv("POLIGLOT_KEYSTORE_PASSWORD") ?: "poliglot"
         }
     }
 
