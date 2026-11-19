@@ -100,7 +100,7 @@ nav.tabs button.on{color:var(--accent);font-weight:700}
 .rate{display:flex;gap:6px}
 .rate button{flex:1;padding:8px 0;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-weight:700}
 .rate button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-input[type=number],input[type=time],textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit;background:var(--surface);color:var(--ink)}
+input[type=number],input[type=time],input[type=text],textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit;background:var(--surface);color:var(--ink)}
 textarea{min-height:70px;resize:vertical}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 .recbig{width:96px;height:96px;border-radius:50%;border:0;background:var(--accent);display:grid;place-items:center;margin:4px auto;box-shadow:0 6px 18px rgba(232,98,44,.35)}
@@ -117,6 +117,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mu
 .score{font:700 46px/1 var(--display);text-align:center}
 .miss{background:#FBE3DC;color:#A8401A;border-radius:4px;padding:0 3px}
 .hit{color:var(--ok);font-weight:700}
+.near{color:#A8701A;font-weight:700}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(80px + env(safe-area-inset-bottom));background:var(--ink);color:#fff;border-radius:12px;padding:11px 14px;z-index:30;font-size:14px;max-width:588px;margin:0 auto}
 .speak svg{width:18px;height:18px}
 .note{font-size:13px;background:var(--accent-soft);border-radius:10px;padding:9px 11px;color:#7A3014}
@@ -198,6 +199,7 @@ select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 10
 <script src="data.js"></script>
 <script src="stories.js"></script>
 <script src="dialogs.js"></script>
+<script src="lessons.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

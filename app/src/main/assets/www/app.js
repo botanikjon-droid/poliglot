@@ -10,7 +10,8 @@
     return null;
   }
   var S = load() || { v: 1, start: today(), en: {}, ar: {}, active: [], reports: {}, known: { en: [], ar: [] }, rem: "20:00", remOn: false, doneAt: {} };
-  if (!S.forgot) S.forgot = {}; // unutilgan so`zlar: { soz: kun }
+  if (!S.forgot) S.forgot = {};
+  if (!S.lesMig) { Object.keys(S.doneAt || {}).forEach(function (k) { var d = +k, n = enTasks(d).length; S.en[d] = S.en[d] || []; S.en[d][n - 1] = true; }); S.lesMig = 1; } // unutilgan so`zlar: { soz: kun }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} pushStatus(); }
 
   var ui = { tab: "today", day: curDay(), cat: "all", card: 0, flip: false, arMode: "letters", phrLang: "en",
@@ -378,6 +379,7 @@
     else if (t.a === "rec") act = '<button class="btn ghost sm" data-go="rec">Yozish</button>';
     else if (t.a === "report") act = '<button class="btn ghost sm" data-go="report">Hisobot</button>';
     else if (t.a === "arcards") act = '<button class="btn ghost sm" data-go="arcards">Kartochkalar</button>';
+    else if (t.a === "lesson") act = '<button class="btn ghost sm" data-go="lesson">Darsni boshlash</button>';
     else if (t.a === "story") act = '<button class="btn ghost sm" data-go="story">Hikoyaga o\'tish</button>';
     return '<div class="task ' + (done ? "done" : "") + '"><button class="check" data-toggle="' + tr + "|" + d + "|" + i + '" aria-label="Bajarildi">' + I.tick + '</button>' +
       '<div class="grow"><div class="row"><span class="tt grow">' + esc(t.t) + '</span><span class="muted small">' + t.m + " daq</span></div>" +
@@ -392,6 +394,134 @@
       '<span class="tr">' + esc(x.tr) + '</span><span class="uz">' + esc(x.uz) + "</span>" +
       (L ? '<span class="uz">Misol: <span class="arw" style="font-size:20px">' + esc(x.ex) + "</span> " + esc(x.exTr) + " — " + esc(x.exUz) + "</span>" : "") +
       "</button>";
+  }
+
+  // ---------- kun darsi (Polyglot Teacher formati) ----------
+  var LS_STEPS = ["Isinish", "So'zlar", "Grammatika", "Gapirish", "Esga olish", "Uy vazifasi"];
+  function lsNorm(s) { return String(s || "").toLowerCase().replace(/[’']/g, "'").replace(/[^a-z' ]/g, " ").replace(/\s+/g, " ").trim(); }
+  function lsLev(a, b) {
+    var m = a.length, n = b.length, p = [], i, j;
+    for (j = 0; j <= n; j++) p[j] = j;
+    for (i = 1; i <= m; i++) { var prev = p[0]; p[0] = i; for (j = 1; j <= n; j++) { var t = p[j]; p[j] = Math.min(p[j] + 1, p[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; } }
+    return p[n];
+  }
+  function lsOk(ans, target) {
+    var a = lsNorm(ans), t = lsNorm(target.replace(/\?$/, ""));
+    if (!a) return false;
+    if (a === t) return true;
+    return t.length > 4 && lsLev(a, t) <= 1;
+  }
+  function lsMark(ans, w) {
+    if (!lsOk(ans, w)) return '<div class="small">✗ To\'g\'ri javob: <b>' + esc(w) + "</b></div>";
+    if (lsNorm(ans) !== lsNorm(w.replace(/\?$/, ""))) return '<div class="small near">≈ Deyarli! To\'g\'ri yozilishi: <b>' + esc(w) + "</b></div>";
+    return '<div class="small hit">✓ ' + esc(w) + "</div>";
+  }
+  function lsWarmWords(d) { var p = LESSONS[d - 1]; return p ? [p.v[0], p.v[2]] : []; }
+  function lsRec(d) { S.les = S.les || {}; return S.les[d]; }
+  function lsStart(d) {
+    if (ui.sh) { shClear(); ui.sh = null; }
+    var old = lsRec(d) || {};
+    ui.ls = { d: d, step: d > 1 ? 0 : 1, warm: ["", ""], warmChk: false, rc: ["", "", "", "", ""], rcChk: false, ans: old.ans || "", fb: null };
+    openSheet("lesson");
+  }
+  function lsScore() {
+    var ls = ui.ls, L = LESSONS[ls.d], ww = lsWarmWords(ls.d), s = 0;
+    s += ww.length ? ww.filter(function (w, i) { return lsOk(ls.warm[i], w[0]); }).length * 10 : 20;
+    s += L.v.filter(function (w, i) { return lsOk(ls.rc[i], w[0]); }).length * 10;
+    var f = ls.fb || lsFeedback();
+    s += Math.min(f.sent, 3) * 5 + Math.min(f.used.length, 2) * 5 + (f.sent && !f.errs.length ? 5 : 0);
+    return s;
+  }
+  function lsFeedback() {
+    var ls = ui.ls, L = LESSONS[ls.d], txt = ls.ans || "";
+    var sent = txt.split(/[.!?\n]+/).filter(function (x) { return x.trim().split(/\s+/).length >= 3; }).length;
+    var low = " " + lsNorm(txt) + " ";
+    var used = L.v.filter(function (w) { var k = lsNorm(w[0]).split(" ")[0]; return k.length > 2 && low.indexOf(" " + k) >= 0; }).map(function (w) { return w[0]; });
+    return { sent: sent, used: used, errs: txt.trim() ? lessonCheck(txt) : [] };
+  }
+  function lsText() {
+    var ls = ui.ls, L = LESSONS[ls.d];
+    return "Poliglot — " + ls.d + "-kun darsi. Gapirish javobim:\n" +
+      "Savol: " + L.q + "\n\n" + (ls.ans || "").trim() + "\n\n" +
+      "Grammatika mavzusi: " + L.g.t + "\nIltimos, xatolarimni tuzating (Mening gapim / To'g'ri gap / Izoh / Tabiiyroq variant) va yana bitta savol bering.";
+  }
+  function lessonHtml(d) {
+    var L = lessonOf(d); if (!L) return "";
+    var r = lsRec(d);
+    return '<section class="card" id="lesson"><div class="row"><span class="pill en">Kun darsi</span><span class="grow"></span>' +
+      (r && r.score != null ? '<span class="pill ' + (r.score >= 75 ? "ok" : "en") + '">' + r.score + "/100</span>" : "") +
+      '<button class="btn acc sm" data-go="lesson">' + (r ? "Qayta o'tish" : "Darsni boshlash") + "</button></div>" +
+      "<h2>" + esc(L.g.t) + '</h2><div class="muted small">5 ta yangi so\'z · bitta qoida · gapirish · esga olish · uy vazifasi (~15 daq)</div>' +
+      '<div class="chips">' + L.v.map(function (w) { return '<button class="chip" data-speak="' + esc(w[0]) + '" data-lang="en"><b>' + esc(w[0]) + "</b> " + esc(w[3]) + "</button>"; }).join("") + "</div></section>";
+  }
+  function lsSheet() {
+    var ls = ui.ls, d = ls.d, L = LESSONS[d], h;
+    h = '<div class="row"><h2 class="grow">' + d + '-kun darsi</h2><span class="muted small">' + (ls.step + 1) + "/6</span></div>" +
+      '<div class="steps">' + LS_STEPS.map(function (t, i) { return '<button class="pill ' + (ls.step === i ? "en" : "") + '" data-lsstep="' + i + '">' + (i + 1) + ". " + t + "</button>"; }).join(" ") + "</div>";
+    if (ls.step === 0) {
+      var ww = lsWarmWords(d);
+      if (!ww.length) h += '<div class="shbox"><div>Bu birinchi dars — isinish yo\'q. Keyingi bosqichga o\'ting.</div></div>';
+      else {
+        h += '<div class="muted small">Kechagi darsdan: o\'zbekchasiga qarab inglizcha yozing. Javob tekshirishdan keyin ko\'rinadi.</div>';
+        ww.forEach(function (w, i) {
+          h += '<label class="f">' + esc(w[3]) + '<input type="text" autocapitalize="off" autocomplete="off" data-lsin="warm|' + i + '" value="' + esc(ls.warm[i]) + '"></label>' +
+            (ls.warmChk ? lsMark(ls.warm[i], w[0]) : "");
+        });
+        h += '<div class="btns"><button class="btn ghost" data-act="lsWarm">Tekshirish</button></div>';
+      }
+    } else if (ls.step === 1) {
+      h += '<div class="muted small">Har bir so\'zni tinglang, 3 marta ayting va mikrofon bilan talaffuzni tekshiring.</div>' +
+        L.v.map(function (w) {
+          return '<div class="phr"><div class="grow"><div class="p">' + esc(w[0]) + ' <span class="muted small">/' + esc(w[1]) + "/ · " + esc(w[2]) + "</span></div>" +
+            '<div class="small"><b>' + esc(w[3]) + '</b> — <span class="muted">' + esc(w[4]) + "</span></div></div>" +
+            '<div class="pbtns">' + speakBtn(w[4], "en") + checkBtn(w[0], "en") + "</div></div>";
+        }).join("");
+    } else if (ls.step === 2) {
+      h += '<div class="shbox"><div class="ex big">' + esc(L.g.t) + "</div><div>" + esc(L.g.r) + "</div></div>" +
+        L.g.ex.map(function (x) { return '<div class="phr"><div class="grow">' + esc(x) + "</div>" + speakBtn(x, "en") + "</div>"; }).join("") +
+        '<div class="note">❌ ' + esc(L.g.bad) + "<br>✅ <b>" + esc(L.g.good) + "</b><br>" + esc(L.g.why) + "</div>";
+    } else if (ls.step === 3) {
+      var f = ls.fb;
+      h += '<div class="shbox"><div class="ex big">' + esc(L.q) + '</div><div class="muted small">Kamida 3 ta to\'liq gap. Bugungi so\'zlardan 2 tasini ishlating. Klaviaturadagi mikrofon bilan aytib yozishingiz ham mumkin.</div></div>' +
+        '<textarea data-lsin="ans" rows="5" placeholder="Javobingizni inglizcha yozing...">' + esc(ls.ans) + "</textarea>" +
+        '<div class="btns"><button class="btn acc grow" data-act="lsSpeak">Tekshirish</button>' + speakBtn(L.q, "en") + "</div>";
+      if (f) {
+        h += '<div class="small">Gaplar: <b>' + f.sent + "</b>/3 · Yangi so'zlar: <b>" + (f.used.length ? esc(f.used.join(", ")) : "—") + "</b></div>";
+        if (!f.errs.length) h += '<div class="note" style="background:var(--ok-soft);color:var(--ok)">Ilova xato topmadi. To\'liq tekshiruv uchun Claude\'ga yuboring.</div>';
+        f.errs.forEach(function (e) {
+          h += '<div class="note"><b>Sizning gapingiz:</b> ' + esc(e.bad) + "<br><b>To'g'ri gap:</b> " + esc(e.good) + "<br><b>Izoh:</b> " + esc(e.why) + "</div>";
+        });
+        h += '<div class="btns"><button class="btn ghost" data-act="lsCopy">Claude\'ga yuborish (tuzatish uchun)</button></div>';
+      }
+    } else if (ls.step === 4) {
+      h += '<div class="muted small">Bugungi so\'zlar: o\'zbekchasiga qarab inglizchasini yozing. Avval o\'zingiz urinib ko\'ring!</div>';
+      L.v.forEach(function (w, i) {
+        h += '<label class="f">' + (i + 1) + ". " + esc(w[3]) + '<input type="text" autocapitalize="off" autocomplete="off" data-lsin="rc|' + i + '" value="' + esc(ls.rc[i]) + '"></label>' +
+          (ls.rcChk ? lsMark(ls.rc[i], w[0]) : "");
+      });
+      h += '<div class="btns"><button class="btn ghost" data-act="lsRecall">Tekshirish</button></div>';
+    } else {
+      var sc = lsScore(), lvl = sc >= 90 ? "A'lo!" : sc >= 75 ? "Yaxshi" : sc >= 60 ? "Yana biroz mashq kerak" : "Darsni takrorlang";
+      h += '<div class="score">' + sc + '<small class="muted" style="font-size:18px">/100</small></div><div style="text-align:center"><b>' + lvl + "</b></div>" +
+        '<h3>Uy vazifasi</h3><ol class="rules">' + L.hw.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ol>" +
+        (sc < 60 ? '<div class="note">60 balldan past: ertangi darsdan oldin shu darsni yana bir bor o\'ting.</div>' : "") +
+        '<div class="btns"><button class="btn acc grow" data-act="lsFinish">Darsni yakunlash</button></div>';
+    }
+    h += '<div class="btns">' + (ls.step > 0 ? '<button class="btn ghost" data-act="lsPrev">Orqaga</button>' : "") +
+      (ls.step < 5 ? '<button class="btn grow" data-act="lsNext">Keyingi: ' + LS_STEPS[ls.step + 1] + "</button>" : "") +
+      '<button class="btn ghost" data-act="close">Yopish</button></div>';
+    return h;
+  }
+  function lsFinish() {
+    var ls = ui.ls, d = ls.d, sc = lsScore(), en = enTasks(d), i = en.length - 1, wasDone = dayDone(d);
+    S.les = S.les || {};
+    var prev = S.les[d];
+    S.les[d] = { score: Math.max(sc, prev && prev.score || 0), last: sc, ans: ls.ans, date: today() };
+    S.en[d] = S.en[d] || []; S.en[d][i] = true; markActive();
+    if (!wasDone && dayDone(d)) { S.doneAt[d] = today(); }
+    save(); ui.ls = null; closeSheet(); render();
+    var el = document.getElementById("lesson"); if (el) el.scrollIntoView();
+    toast("Dars yakunlandi: " + sc + "/100. Uy vazifasini bajaring!");
   }
 
   // ---------- kun hikoyasi ----------
@@ -557,6 +687,7 @@
       '<div class="bar"><i style="width:' + pct + '%"></i></div><div class="row small muted"><span class="grow">' + cnt + " / " + tot + " vazifa · ~" + (enMin + arMin) + " daqiqa</span>" +
       (dayDone(d) ? '<span class="pill ok">Kun bajarildi</span>' : d === curDay() ? '<span class="pill en">Bugungi kun</span>' : "") + "</div></section>";
 
+    h += lessonHtml(d);
     h += storyHtml(d);
     h += dialogHtml(d);
 
@@ -715,7 +846,13 @@
 
   // ---------- pastki oyna (sheet) ----------
   function openSheet(kind) { ui.sheet = kind; renderSheet(); }
-  function closeSheet() { if (ui.dl) { dlgClear(); ui.dl = null; } if (ui.sh) { shClear(); ui.sh = null; } if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
+  function closeSheet() {
+    var back = ui.sheet === "check" && ui.ls;
+    if (ui.sheet === "lesson") ui.ls = null;
+    closeSheet0();
+    if (back) { ui.sheet = "lesson"; renderSheet(); }
+  }
+  function closeSheet0() { if (ui.dl) { dlgClear(); ui.dl = null; } if (ui.sh) { shClear(); ui.sh = null; } if (srObj) { try { srObj.abort(); } catch (e) {} srObj = null; } ui.sheet = null; ui.check = null; $("#layer").innerHTML = ""; }
   function renderSheet() {
     var L = $("#layer"), h = "";
     if (!ui.sheet) { L.innerHTML = ""; return; }
@@ -732,6 +869,8 @@
           '<div class="muted small">' + (sc.pct >= 80 ? "Zo'r! Endi tezroq va tabiiyroq ayting." : "Qizil so'zlarni tinglab, sekin takrorlang, keyin yana tekshiring.") + "</div>";
       }
       h += '<div class="btns"><button class="btn ghost" data-speak="' + esc(c.text) + '" data-lang="' + c.lang + '">Tinglash</button><button class="btn acc" data-act="relisten">Qayta aytish</button><button class="btn ghost" data-act="close">Yopish</button></div>';
+    } else if (ui.sheet === "lesson" && ui.ls) {
+      h = lsSheet();
     } else if (ui.sheet === "dialog" && ui.dl) {
       h = dlgSheet();
     } else if (ui.sheet === "shadow" && ui.sh) {
@@ -860,6 +999,7 @@
       "Arab (" + AR_DAYS[d].t + "): " + ac + "/" + ar.length + " vazifa\n" +
       "Vaqt: " + (r.min != null ? r.min : "?") + " daqiqa · Ravonlik: " + (r.rate || "?") + "/5\n" +
       "Unutilgan so'zlar: " + (Object.keys(S.forgot).filter(function (k) { return S.forgot[k] === d; }).join(", ") || "—") + "\n" +
+      (S.les && S.les[d] ? "Kun darsi: " + S.les[d].score + "/100\n" : "") +
       dialogReportLine(d) +
       "Seriya: " + streak() + " kun · Bajarilgan kunlar: " + doneDays() + "/30\n" +
       "Izoh: " + (r.note || "—");
@@ -887,6 +1027,7 @@
     }
     if (ds.remember) { delete S.forgot[ds.remember]; markActive(); save(); render(); var sr = document.getElementById("story"); if (sr) sr.scrollIntoView(); toast("Barakalla!"); return; }
     if (ds.check) { startCheck(ds.check, ds.lang); return; }
+    if (ds.lsstep) { ui.ls.step = +ds.lsstep; renderSheet(); return; }
     if (ds.dlgstage) { dlgStart(+ds.dlgstage); return; }
     if (ds.dlgrole) { ui.dl.role = +ds.dlgrole; ui.dl.i = 0; dlgGo(); return; }
     if (ds.dlgknew) { var dk = ui.dl; dk.knew[dk.i] = ds.dlgknew === "1"; dk.i++; dlgGo(); return; }
@@ -900,7 +1041,8 @@
       save(); render(); return;
     }
     if (ds.go) {
-      if (ds.go === "phr") startShadow();
+      if (ds.go === "lesson") lsStart(ui.day);
+      else if (ds.go === "phr") startShadow();
       else if (ds.go === "timer") openSheet("timer");
       else if (ds.go === "rec") { ui.tab = "rec"; render(); window.scrollTo(0, 0); }
       else if (ds.go === "story") { var st = document.getElementById("story"); if (st) st.scrollIntoView({ behavior: "smooth" }); }
@@ -925,6 +1067,13 @@
       case "flip": ui.flip = !ui.flip; render(); break;
       case "cardDir": S.cardDir = S.cardDir === "en" ? "uz" : "en"; save(); ui.flip = false; render(); break;
       case "shadow": startShadow(); break;
+      case "lsNext": ui.ls.step = Math.min(5, ui.ls.step + 1); renderSheet(); break;
+      case "lsPrev": ui.ls.step = Math.max(0, ui.ls.step - 1); renderSheet(); break;
+      case "lsWarm": ui.ls.warmChk = true; renderSheet(); break;
+      case "lsRecall": ui.ls.rcChk = true; renderSheet(); break;
+      case "lsSpeak": ui.ls.fb = lsFeedback(); renderSheet(); break;
+      case "lsCopy": { var lt = lsText(); if (A && A.share) { try { A.share(lt); } catch (er) { copyText(lt, "Nusxa olindi. Claude chatiga joylang."); } } else copyText(lt, "Nusxa olindi. Claude chatiga joylang."); break; }
+      case "lsFinish": lsFinish(); break;
       case "dlgStart": dlgStart(1); break;
       case "dlgPause": ui.dl.run = !ui.dl.run; if (ui.dl.run) dlgGo(); else { dlgClear(); renderSheet(); } break;
       case "dlgNextStage": dlgClear(); dlgFinishStage(); break;
@@ -982,6 +1131,12 @@
         try { A.deleteRecording(nm); } catch (er) {} closeSheet(); render(); break;
       }
     }
+  });
+  document.addEventListener("input", function (e) {
+    var k = e.target.dataset && e.target.dataset.lsin; if (!k || !ui.ls) return;
+    var p = k.split("|");
+    if (p[0] === "ans") { ui.ls.ans = e.target.value; ui.ls.fb = null; }
+    else ui.ls[p[0]][+p[1]] = e.target.value;
   });
   document.addEventListener("change", function (e) {
     if (e.target.id === "rmin" || e.target.id === "rnote") { readReport(); save(); }

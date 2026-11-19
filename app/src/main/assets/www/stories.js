@@ -79,5 +79,6 @@ function storyReviewWords(d) {
 function enTasks(d) {
   var t = enBaseTasks(d);
   if (STORIES[d]) t = t.concat([{ t: "Kun hikoyasi", m: 5, d: "Hikoyani tinglang, 2 marta ovoz chiqarib o'qing, savollarga javob bering va o'zingiz haqida qayta aytib bering. Unutgan so'zlaringizni belgilang.", a: "story" }]);
+  if (typeof LESSONS !== "undefined" && LESSONS[d]) t = t.concat([{ t: "Kun darsi", m: 15, d: "5 ta so'z, bitta qoida, gapirish savoli, esga olish testi va uy vazifasi. 100 ballik baho oling.", a: "lesson" }]);
   return t;
 }
